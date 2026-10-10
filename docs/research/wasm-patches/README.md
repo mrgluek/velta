@@ -31,13 +31,16 @@ meaning a **Velta-owned forward-port of chatmail/core 2.62+** targeting
 Master `core/` stays on Velta’s production quilt (`tools/apply-core-patches.py`;
 13 ops at the series’ 2.62 baseline, 21 ops at core 2.63.0).
 
-> **FROZEN at the 2.62 baseline (2026-10-10).** The series is **10 patches**
-> (`series.txt`, 0001–0010) and no longer applies to production `core/`
-> 2.63.0: 0002, 0004 and 0007 fail (0006/0008 fail standalone too), and the
-> pinned locks are stale. Not rebased; the PWA keeps its 2.62-based wasm
-> build until a dedicated rebase task. Never apply it to production `core/`.
-**Production `core/` stays stock until the
-[landing checklist](../wasm-core-landing-checklist.md) is green.**
+> **Rebased for 2.63.0 (#112, 2026-10-11, commit 56edd88).** The series is
+> **10 patches** (`series.txt`, 0001–0010) and applies again on production
+> `core/` 2.63.0: 0002 regenerated for the new workspace manifest (incl.
+> the wasm32 `deltachat-time` path dep — 2.63 moved it to dev-deps), 0007
+> rebased onto upstream 81140d51 (native WebP `has_animation()`), vendored
+> async-imap 0.12.0 + mail-builder 1.0.0, locks re-pinned (wasm-bindgen
+> stays 0.2.129). wasm32 check + wasm-pack + opt-in CI smoke/e2e green;
+> the relay PWA ships the 2.63 wasm. Never apply the series to production
+> `core/` — **it stays stock until the
+> [landing checklist](../wasm-core-landing-checklist.md) is green.**
 
 ## Apply on a copy (Day 6)
 
@@ -59,7 +62,9 @@ dangerous flag (not for CI). Default dest `.wasm-core-apply/` is gitignored.
 
 **Verified Day 6:** 9/9 patches apply cleanly onto a copy of master `core/`;
 `cargo check` wasm lib **PASS** on that copy. (Historical: 0010 was added
-Day 18 — the series is 10 patches, verified 10/10 on the 2.62 baseline.)
+Day 18 — the series is 10 patches, verified 10/10 on the 2.62 baseline.
+Re-verified on the 2.63 baseline in #112: apply-on-copy + verify-copy
+10/10, wasm32 check PASS, wasm-pack PASS, opt-in CI smoke + e2e green.)
 
 ## Pinned lockfiles (Day 9)
 

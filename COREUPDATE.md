@@ -72,13 +72,15 @@ prebuilts are rebuilt.
 
 ## 0b. Opt-in: re-apply the wasm series (Architecture C track)
 
-> **FROZEN at its 2.62 baseline (2026-10-10).** The series (10 patches,
-> `series.txt`) does not apply to 2.63.0: 0002, 0004 and 0007 fail
-> (0006/0008 fail standalone too, on top of the failed hunks), and the
-> pinned locks are stale against the 2.63 `Cargo.lock`. Not rebased; the
-> PWA stays on its 2.62-based wasm build until a dedicated rebase task.
+> **Rebased for 2.63.0 (#112, 2026-10-11, commit 56edd88).** The series
+> (10 patches, `series.txt`) applies again on production `core/` 2.63.0:
+> `apply-on-copy` + `verify-copy` 10/10, locks re-pinned (rusqlite 0.40.2,
+> wasm-bindgen stays 0.2.129), wasm32 `cargo check` + `wasm-pack` + opt-in
+> CI smoke/e2e green (run 38092673051). The relay PWA ships the 2.63 wasm
+> (SW `velta-pwa-c1075b34fbe7`). Landing the series into production
+> `core/` still waits on the checklist §7 merge gate below.
 
-When rebased, after §0 is green the wasm patch series
+After §0 is green the wasm patch series
 (`docs/research/wasm-patches/`) is re-applied with the dedicated, opt-in
 applicator — **never** let a core upgrade silently ship wasm patches to
 native consumers:

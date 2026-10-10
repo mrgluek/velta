@@ -6,7 +6,7 @@ build/test commands, and conventions as they actually exist in this checkout.
 
 > **Scope note:** This repository is a Velta-specific workspace layered around a
 > copy of the upstream [Delta Chat core](https://github.com/chatmail/core)
-> (version `2.62.0`). The `core/` directory is effectively a vendored copy of
+> (version `2.63.0`). The `core/` directory is effectively a vendored copy of
 > that Rust project. Wrapper code for Velta's own clients lives in `app/`,
 > `velta-app/`, `velta-core-service/`, and `deltachat-backend/`.
 
@@ -99,7 +99,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   ├── fuzz/                 # Fuzz targets
 │   ├── scripts/              # CI helper scripts (clippy, deny, tests, wheels)
 │   ├── test-data/            # fixtures for Rust tests
-│   ├── Cargo.toml            # workspace manifest, version 2.62.0
+│   ├── Cargo.toml            # workspace manifest, version 2.63.0
 │   ├── CMakeLists.txt        # CMake install wrapper for libdeltachat
 │   └── deny.toml             # cargo-deny policy
 │
@@ -260,8 +260,8 @@ the SMTP loop is ACTUALLY bound to, through core rotations and failovers
 and diagnostics tag the send line "(failover)" when it differs from the
 pin. #11 semantics (pin, backoff, From before/after upstream #8711,
 migration from configured_addr): docs/agents/relays.md "Sending relay".
-The wasm patch series has no #10/#11 equivalent and is frozen at its 2.62
-baseline (#112) — the PWA falls back to the configured address.
+The wasm patch series has no #10/#11 equivalent (quilt-refreshed for 2.63
+in #112) — the PWA falls back to the configured address.
 
 ```bash
 # Run all Rust tests; use nextest — plain `cargo test` flakes a varying
@@ -351,7 +351,8 @@ Deploy-dist rules (10-09):
   `node tools/binaryen/node_modules/binaryen/bin/wasm-opt -Os
   build/wasm-dist/deltachat_wasm_bg.wasm -o <same file>` → then build
   WITHOUT the flag so the SW content hash covers the optimized bytes
-  (28.4 → 17.7 MB on 1.4.62's wasm).
+  (28.4 → 17.7 MB on 1.4.62's wasm; 28.6 → 17.6 MB on the 2.63 wasm
+  deployed 2026-10-11, SW `velta-pwa-c1075b34fbe7`).
 
 Detection is runtime-only — `app.js` is shared by all three targets and
 never branches at build time: `window.VELTA_PWA` exists ONLY in the dist
@@ -590,7 +591,7 @@ Then copy `core/target/release/deltachat-rpc-server.exe` to
 `velta-app/src-tauri/binaries/deltachat-rpc-server-x86_64-pc-windows-msvc.exe`
 *and* `velta-app/src-tauri/binaries/deltachat-rpc-server.exe`, and verify the
 swap by piping a `get_system_info` JSON-RPC request into the exe's stdin —
-it must report the vendored core's version (v2.62.0 since 1.4.33; the
+it must report the vendored core's version (v2.63.0 since 1.4.63; the
 previous prebuilt was silently v2.59.0, which the drawer footer exposed).
 `.github/workflows/build-windows.yml` does the same via
 chocolatey-installed StrawberryPerl + NASM.
@@ -1824,7 +1825,7 @@ next push or the tainted commits come back.
 ### 7.2 Frontend
 
 Regression suites (Node's built-in test runner, no dependencies). Run the
-whole set — 54 files, 432 tests as of 2026-10-10:
+whole set — 58 files, 466 tests as of 2026-10-11:
 
 ```bash
 node --test tests/
