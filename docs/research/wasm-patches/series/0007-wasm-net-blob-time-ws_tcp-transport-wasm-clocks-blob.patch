@@ -1,6 +1,6 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: spike <spike@local>
-Date: Mon, 5 Oct 2026 22:43:00 +0300
+Date: Sun, 11 Oct 2026 00:23:52 +0300
 Subject: [PATCH] wasm(net,blob,time): ws_tcp transport, wasm clocks, blob
  sync_fs, fetch
 
@@ -13,13 +13,19 @@ Subject: [PATCH] wasm(net,blob,time): ws_tcp transport, wasm clocks, blob
   byte-for-byte identical recode output - avatar golden unchanged).
 - deltachat-ratelimit uses the wasm-safe clock.
 
+2.63 refresh (#112): check_or_recode_to_size re-based onto upstream
+81140d51 (native WebP has_animation() check; the vendored animated-WebP
+patch #7 retired, so the old separate sniff and its two hunks are
+dropped). migrations.rs: upstream dropped the Time::now() timing around
+migrate_key_contacts - hunk obsolete. image_metadata refactor unchanged.
+
 WASM-CORE: prototype 0005, 0006, 0007, 0010 (MPL ideas).
 Native impact: mechanical call-site refactors, no behaviour change
 (full lib nextest 1135/1135 on the copy).
 ---
  deltachat-ratelimit/Cargo.toml |   1 +
  deltachat-ratelimit/src/lib.rs |  15 ++--
- src/blob.rs                    |  97 +++++++++++++++-------
+ src/blob.rs                    |  89 ++++++++++++++------
  src/context.rs                 |   6 +-
  src/imap.rs                    |   4 +-
  src/imap/idle.rs               |   2 +-
@@ -32,10 +38,11 @@ Native impact: mechanical call-site refactors, no behaviour change
  src/scheduler.rs               |   2 +-
  src/smtp.rs                    |   2 +-
  src/smtp/send.rs               |   2 +-
- src/sql/migrations.rs          |   6 +-
+ src/sql/migrations.rs          |   4 +-
  src/sql/pool/wal_checkpoint.rs |   8 +-
  src/tools.rs                   |  61 +++++++++++++-
- 18 files changed, 354 insertions(+), 56 deletions(-)
+ 18 files changed, 350 insertions(+), 50 deletions(-)
+ create mode 100644 src/net/ws_tcp.rs
 
 diff --git a/deltachat-ratelimit/Cargo.toml b/deltachat-ratelimit/Cargo.toml
 index 9556177..a406230 100644
@@ -108,7 +115,7 @@ index 497cc83..bef63c4 100644
          let mut ratelimit = Ratelimit::new_at(Duration::new(60, 0), 3.0, now);
          assert!(ratelimit.can_send_at(now));
 diff --git a/src/blob.rs b/src/blob.rs
-index c5d4ed6..d15acb8 100644
+index 183ce2f..8320fef 100644
 --- a/src/blob.rs
 +++ b/src/blob.rs
 @@ -25,6 +25,26 @@
@@ -175,7 +182,7 @@ index c5d4ed6..d15acb8 100644
              };
  
              BlobObject::create_and_deduplicate(context, &temp_path, Path::new(original_name))
-@@ -335,11 +355,25 @@ fn check_or_recode_to_size(
+@@ -337,13 +357,27 @@ fn check_or_recode_to_size(
          let original_name = name.clone();
          let vt = &mut *viewtype;
          let res: Result<String> = tokio::task::block_in_place(move || {
@@ -203,28 +210,12 @@ index c5d4ed6..d15acb8 100644
 -            // It's strange that BufReader modifies a file position while it takes a non-mut
 -            // reference. Ok, just rewind it.
              file.rewind()?;
-             // Velta patch (re-apply on core upgrades, see VENDORISSUES.MD):
-             // animated WebP must not be recoded — the `image` crate decodes
-@@ -349,15 +383,12 @@ fn check_or_recode_to_size(
-                 return Ok(name);
-             }
-             file.rewind()?;
--            let imgreader = ImageReader::new(std::io::BufReader::new(&file)).with_guessed_format();
-+            let imgreader = ImageReader::new(file).with_guessed_format();
-             let imgreader = match imgreader {
-                 Ok(ir) => ir,
-                 _ => {
--                    file.rewind()?;
--                    ImageReader::with_format(
--                        std::io::BufReader::new(&file),
--                        ImageFormat::from_path(self.to_abs_path())?,
--                    )
-+                    let (_, file) = open_reader()?;
-+                    ImageReader::with_format(file, ImageFormat::from_path(&abs_path)?)
-                 }
-             };
+-            let imgreader = ImageReader::new(std::io::BufReader::new(&file))
++            let imgreader = ImageReader::new(file)
+                 .with_guessed_format()
+                 .context("Failed to guess image format due to I/O error")?;
              let fmt = imgreader.format().context("Unknown format")?;
-@@ -555,11 +586,20 @@ fn file_hash(src: &Path) -> Result<blake3::Hash> {
+@@ -542,25 +576,34 @@ fn file_hash(src: &Path) -> Result<blake3::Hash> {
          "Use `get_abs_path()` to get the absolute path of the blobfile"
      );
      let mut hasher = blake3::Hasher::new();
@@ -250,19 +241,8 @@ index c5d4ed6..d15acb8 100644
      let hash = hasher.finalize();
      Ok(hash)
  }
-@@ -571,7 +611,7 @@ fn file_hash(src: &Path) -> Result<blake3::Hash> {
- /// crate decodes only the first frame, so recoding an animated webp would
- /// silently strip the animation — upstream tracks this in the TODO inside
- /// `check_or_recode_to_size`. Animated webps are sent byte-exact instead.
--fn is_animated_webp(file: &mut std::fs::File) -> std::io::Result<bool> {
-+fn is_animated_webp<R: std::io::Read + std::io::Seek>(file: &mut R) -> std::io::Result<bool> {
-     use std::io::Read;
-     file.rewind()?;
-     let mut head = Vec::new();
-@@ -584,15 +624,16 @@ fn is_animated_webp(file: &mut std::fs::File) -> std::io::Result<bool> {
- }
  
- /// Returns image file size and Exif.
+-/// Returns image file size and Exif.
 -fn image_metadata(file: &std::fs::File) -> Result<(u64, Option<exif::Exif>)> {
 -    let len = file.metadata()?.len();
 -    let mut bufreader = std::io::BufReader::new(file);
@@ -282,7 +262,7 @@ index c5d4ed6..d15acb8 100644
  
  fn exif_orientation(exif: &exif::Exif, context: &Context) -> Orientation {
 diff --git a/src/context.rs b/src/context.rs
-index a1020ec..5d7b36d 100644
+index 360b82d..4b6086b 100644
 --- a/src/context.rs
 +++ b/src/context.rs
 @@ -498,7 +498,7 @@ pub(crate) fn with_blobdir(
@@ -303,7 +283,7 @@ index a1020ec..5d7b36d 100644
          info!(self, "background_fetch started.");
  
          if self.scheduler.is_running().await {
-@@ -800,7 +800,7 @@ pub async fn stop_ongoing(&self) {
+@@ -780,7 +780,7 @@ pub async fn stop_ongoing(&self) {
                  }
                  info!(self, "Signaling the ongoing process to stop ASAP.",);
                  *s = RunningState::ShallStop {
@@ -313,7 +293,7 @@ index a1020ec..5d7b36d 100644
              }
              RunningState::ShallStop { .. } | RunningState::Stopped => {
 diff --git a/src/imap.rs b/src/imap.rs
-index 3274a74..377eff4 100644
+index 86daa86..dc8ce2a 100644
 --- a/src/imap.rs
 +++ b/src/imap.rs
 @@ -259,7 +259,7 @@ pub fn transport_id(&self) -> u32 {
@@ -335,7 +315,7 @@ index 3274a74..377eff4 100644
          const BACKOFF_MAX_MS: u64 = 80_000;
          self.conn_backoff_ms = min(self.conn_backoff_ms, BACKOFF_MAX_MS / 2);
 diff --git a/src/imap/idle.rs b/src/imap/idle.rs
-index 1744f2a..3a8995a 100644
+index ad1485f..f34488d 100644
 --- a/src/imap/idle.rs
 +++ b/src/imap/idle.rs
 @@ -127,7 +127,7 @@ pub async fn idle(
@@ -348,10 +328,10 @@ index 1744f2a..3a8995a 100644
          info!(context, "IMAP-fake-IDLEing folder={:?}", watch_folder);
  
 diff --git a/src/key.rs b/src/key.rs
-index e7d69eb..7a4a083 100644
+index 3a57a49..693c54b 100644
 --- a/src/key.rs
 +++ b/src/key.rs
-@@ -478,7 +478,7 @@ async fn generate_keypair(context: &Context) -> Result<SignedSecretKey> {
+@@ -479,7 +479,7 @@ async fn generate_keypair(context: &Context) -> Result<SignedSecretKey> {
      match load_keypair(context).await? {
          Some(key_pair) => Ok(key_pair),
          None => {
@@ -693,10 +673,10 @@ index c059944..58f5b2a 100644
                      ctx,
                      "SMTP has messages to retry, planning to retry {t} seconds later."
 diff --git a/src/smtp.rs b/src/smtp.rs
-index 0dd5e3a..e0a9c28 100644
+index bb0550b..9e36a24 100644
 --- a/src/smtp.rs
 +++ b/src/smtp.rs
-@@ -187,7 +187,7 @@ pub async fn connect(
+@@ -223,7 +223,7 @@ pub async fn connect(
              };
  
              self.transport = Some(transport);
@@ -719,7 +699,7 @@ index bcdd103..a983667 100644
      }
  }
 diff --git a/src/sql/migrations.rs b/src/sql/migrations.rs
-index 7836c4b..efea47b 100644
+index 4229b49..9df1e3c 100644
 --- a/src/sql/migrations.rs
 +++ b/src/sql/migrations.rs
 @@ -16,7 +16,7 @@
@@ -731,7 +711,7 @@ index 7836c4b..efea47b 100644
  use crate::transport::ConfiguredLoginParam;
  
  const DBVERSION: i32 = 68;
-@@ -698,7 +698,7 @@ pub(crate) async fn msgs_to_key_contacts(context: &Context) -> Result<()> {
+@@ -695,7 +695,7 @@ pub(crate) async fn msgs_to_key_contacts(context: &Context) -> Result<()> {
          .context("Update first_key_contacts_msg_id")?;
          Ok((msgs_migrated, first_key_contacts_msg_id))
      };
@@ -740,15 +720,6 @@ index 7836c4b..efea47b 100644
      let mut msgs_migrated = 0;
      loop {
          let (n, first_key_contacts_msg_id) = sql.transaction(trans_fn).await?;
-@@ -1936,7 +1936,7 @@ pub async fn run(context: &Context, sql: &Sql) -> Result<bool> {
- 
-     inc_and_check(&mut migration_version, 132)?;
-     if dbversion < migration_version {
--        let start = Time::now();
-+        let start = time_now();
-         sql.execute_migration_transaction(|t| migrate_key_contacts(context, t), migration_version)
-             .await?;
-         info!(
 diff --git a/src/sql/pool/wal_checkpoint.rs b/src/sql/pool/wal_checkpoint.rs
 index 0d95be9..5185a4f 100644
 --- a/src/sql/pool/wal_checkpoint.rs
@@ -790,7 +761,7 @@ index 0d95be9..5185a4f 100644
          let blocked = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
              let blocked: i64 = row.get(0)?;
 diff --git a/src/tools.rs b/src/tools.rs
-index 14f9641..fb78206 100644
+index 381e1b6..1856fe8 100644
 --- a/src/tools.rs
 +++ b/src/tools.rs
 @@ -18,13 +18,15 @@
@@ -811,7 +782,7 @@ index 14f9641..fb78206 100644
  pub use deltachat_time::SystemTimeTools as SystemTime;
  use mailparse::MailHeaderMap;
  use mailparse::dateparse;
-@@ -495,6 +497,45 @@ pub async fn read_file(context: &Context, path: &Path) -> Result<Vec<u8>> {
+@@ -496,6 +498,45 @@ pub async fn read_file(context: &Context, path: &Path) -> Result<Vec<u8>> {
      }
  }
  
@@ -857,7 +828,7 @@ index 14f9641..fb78206 100644
  pub(crate) fn time() -> i64 {
      SystemTime::now()
          .duration_since(SystemTime::UNIX_EPOCH)
-@@ -502,8 +543,22 @@ pub(crate) fn time() -> i64 {
+@@ -503,8 +544,22 @@ pub(crate) fn time() -> i64 {
          .as_secs() as i64
  }
  
@@ -881,3 +852,6 @@ index 14f9641..fb78206 100644
  }
  
  pub(crate) trait IsNoneOrEmpty<T> {
+-- 
+2.43.0
+

@@ -22,8 +22,8 @@ wasm-only.
 |---|---|---|---|---|---|
 | **velta-tokio-wasm 0.1.0** (Velta-original) | `support/crates/velta-tokio-wasm` | none — written clean-room Day 12 (replaces imported `tokio-wasm-shim`) | **MPL-2.0**, authored by Velta: `LICENSE` (canonical MPL-2.0 text) + SPDX header in every source file | n/a (1.4 k lines, rustfmt-clean) | `pub use tokio::*` (feature `full`); wasm modules not compiled on native |
 | astral-tokio-tar **0.6.4** | `support/vendor-crates/astral-tokio-tar` | crates.io 0.6.4 / [astral-sh/tokio-tar](https://github.com/astral-sh/tokio-tar) | MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE kept) | 61 changed lines (header.rs, entry.rs, builder.rs) | `canonicalize` via `tokio::fs` (= `spawn_blocking(std::fs::canonicalize)`); rest gated |
-| async-imap 0.11.3 | `support/vendor-crates/async-imap` | crates.io 0.11.3 / [async-email/async-imap](https://github.com/async-email/async-imap) @ `24b5aa3` | MIT OR Apache-2.0 (kept) | 6 lines `extensions/idle.rs` + wasm-only `wasmtimer` dep; drops tokio `net` feature | none (all gated) |
-| mail-builder 0.5.0 | `support/vendor-crates/mail-builder` | crates.io 0.5.0 / [stalwartlabs/mail-builder](https://github.com/stalwartlabs/mail-builder) | Apache-2.0 OR MIT (`LICENSES/` kept) | 17 lines (`headers/date.rs`, `mime.rs`) + wasm-only `web-time` dep | none (imports gated) |
+| async-imap 0.12.0 | `support/vendor-crates/async-imap` | crates.io 0.12.0 / [async-email/async-imap](https://github.com/async-email/async-imap) | MIT OR Apache-2.0 (kept) | 6 lines `extensions/idle.rs` + wasm-only `wasmtimer` dep; drops tokio `net` feature | none (all gated) |
+| mail-builder 1.0.0 | `support/vendor-crates/mail-builder` | crates.io 1.0.0 / [stalwartlabs/mail-builder](https://github.com/stalwartlabs/mail-builder) | Apache-2.0 OR MIT (`LICENSES/` kept) | ~17 lines (`headers/date.rs`, `mime.rs`) + wasm-only `web-time` dep | none (imports gated) |
 
 ### A1. velta-tokio-wasm — Velta-original replacement (Day 12) ✅
 
@@ -80,20 +80,24 @@ are both upstreamable (no wasm deps needed).
 Known warnings: 2× `unused_braces` in `header.rs` 1715/1718 — upstream code,
 present in stock 0.6.4 as well.
 
-### A3. async-imap 0.11.3
+### A3. async-imap 0.12.0
 
 **Status: patched locally — re-apply on re-vendor.** IDLE `timeout` comes
 from `wasmtimer::tokio` on wasm32 (tokio timers panic on
-`wasm32-unknown-unknown`); tokio `net` feature dropped (pulls mio). Stock
-core resolves the same version. Upstream candidate: a `wasmtimer` cfg in
-`idle.rs`.
+`wasm32-unknown-unknown`); tokio `net` feature dropped (pulls mio).
+2.63 refresh (#112): rebased onto stock 0.12.0, same 2-hunk delta (the
+cfg'd import block survived 0.11→0.12 unchanged). Upstream candidate: a
+`wasmtimer` cfg in `idle.rs`.
 
-### A4. mail-builder 0.5.0
+### A4. mail-builder 1.0.0
 
 **Status: patched locally — re-apply on re-vendor.** `SystemTime`/`UNIX_EPOCH`
-from `web_time` on wasm32 (`std::time::SystemTime::now()` panics there). Stock
-core resolves the same version (0008 bumps the declared dep to 0.5). Upstream
-candidate: `web-time` behind `cfg(target_arch = "wasm32")`.
+from `web_time` on wasm32 (`std::time::SystemTime::now()` panics there).
+2.63 refresh (#112): rebased onto stock 1.0.0 — `date.rs` shrank to a
+one-line `use std::time::SystemTime;` import; vendored `Cargo.toml` keeps
+using the crate's original manifest (`.orig`) + the wasm32 `web-time`
+target table. Upstream candidate: `web-time` behind
+`cfg(target_arch = "wasm32")`.
 
 ### A5. Not vendored
 
@@ -115,11 +119,11 @@ wasm-pack + smoke + e2e (see checklist §7).
 | 0001 | time: `deltachat-time` reads `js_sys::Date` on wasm32 | deltachat-time/{Cargo.toml,src/lib.rs} | tiny; low | none |
 | 0002 | cargo: target-gate native-only deps, add `velta-tokio-wasm`, **rusqlite 0.40** | .cargo/config.toml, Cargo.toml, jsonrpc/Cargo.toml | **high** — rewrites `[dependencies]` table; conflicts on every core dep bump | rusqlite 0.37→0.40.2 ⇒ SQLCipher 4.6.1→4.14.0 (Day 11 upgrade/rollback ✅) |
 | 0003 | cargo: route `tokio` through `velta-tokio-wasm` in every crate | ffi/jsonrpc/repl/rpc-server Cargo.toml | low (one line each) | facade only |
-| 0004 | cargo: `[patch.crates-io]` async-imap + astral-tokio-tar | Cargo.toml | medium — pin `=0.6.4` must track stock tar version | vendored sources on native (see A2/A3) |
+| 0004 | cargo: `[patch.crates-io]` async-imap + astral-tokio-tar | Cargo.toml | medium — pin `=0.6.4` must track stock tar version (2.63: stock moved to 0.7.0, pin kept — wasm-copy-only downgrade) | vendored sources on native (see A2/A3) |
 | 0005 | net/accounts: `http_wasm`/`proxy_wasm` + cfg stubs | accounts, net, net/{http_wasm,proxy_wasm,session,tls}, qr | medium — `net/tls.rs` churns upstream | none (gated) |
 | 0006 | blob/cargo: `ReadDir` cfg for memfs, serde_urlencoded | Cargo.toml, blob.rs | low | none |
 | 0007 | net/blob/time: `ws_tcp`, wasm clocks, blob `sync_fs`, fetch | 18 files (blob, tools, net/*, imap, smtp, sql/migrations, ratelimit…) | **high** — `Time::now()`→`tools::time_now()` sweep touches many call sites; re-grep `Time::now()` after each bump | mechanical refactors; avatar golden unchanged |
-| 0008 | fs/net/tls: `path_exists`/`is_dir`, wasm `connect_tcp`, JsClock, mail-builder 0.5 | Cargo.toml, accounts, context, imex, net, tools | medium | wrappers = `Path::exists/is_dir` |
+| 0008 | fs/net/tls: `path_exists`/`is_dir`, wasm `connect_tcp`, JsClock, mail-builder 1.0 | Cargo.toml, accounts, context, imex, net, tools | medium | wrappers = `Path::exists/is_dir` |
 | 0009 | tests: blob_tests use `BufRead + Seek` `image_metadata` | blob/blob_tests.rs | low | test-only |
 | 0010 | scheduler: `stop()` without `tokio_util::TaskTracker` on wasm32 | scheduler.rs | low — one function, cfg-split | none — native path byte-identical |
 

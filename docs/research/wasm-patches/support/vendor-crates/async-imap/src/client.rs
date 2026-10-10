@@ -10,8 +10,9 @@ use async_std::io::{Read, Write, WriteExt};
 use base64::Engine as _;
 use extensions::id::{format_identification, parse_id};
 use extensions::quota::parse_get_quota_root;
-use futures::{io, Stream, TryStreamExt};
-use imap_proto::{Metadata, RequestId, Response};
+use futures_util::{Stream, TryStreamExt, io};
+use imap_proto::rfc5464::Metadata;
+use imap_proto::{RequestId, Response};
 #[cfg(feature = "runtime-tokio")]
 use tokio::io::{AsyncRead as Read, AsyncWrite as Write, AsyncWriteExt};
 
@@ -210,30 +211,32 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
 
             if let Response::Done {
                 status,
-                code,
-                information,
+                outcome,
                 tag,
             } = res.parsed()
+                && *tag == id
             {
                 ok_or_unauth_client_err!(
-                    self.check_status_ok(status, code.as_ref(), information.as_deref()),
+                    self.check_status_ok(
+                        status,
+                        outcome.code.as_ref(),
+                        outcome.information.as_deref()
+                    ),
                     self
                 );
 
-                if *tag == id {
-                    let capabilities =
-                        if let Some(imap_proto::types::ResponseCode::Capabilities(capabilities)) =
-                            code
-                        {
-                            use crate::types::{Capabilities, Capability};
-                            let capability_set: HashSet<Capability> =
-                                capabilities.iter().map(Capability::from).collect();
-                            Some(Capabilities(capability_set))
-                        } else {
-                            None
-                        };
-                    return Ok((Session::new(self.conn), capabilities));
-                }
+                let capabilities =
+                    if let Some(imap_proto::ResponseCode::Capabilities(capabilities)) =
+                        &outcome.code
+                    {
+                        use crate::types::{Capabilities, Capability};
+                        let capability_set: HashSet<Capability> =
+                            capabilities.iter().map(Capability::from).collect();
+                        Some(Capabilities(capability_set))
+                    } else {
+                        None
+                    };
+                return Ok((Session::new(self.conn), capabilities));
             }
         }
     }
@@ -308,8 +311,8 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Client<T> {
                 return Err((Error::ConnectionLost, self));
             };
             match res.parsed() {
-                Response::Continue { information, .. } => {
-                    let challenge = if let Some(text) = information {
+                Response::Continue(outcome) => {
+                    let challenge = if let Some(text) = &outcome.information {
                         ok_or_unauth_client_err!(
                             base64::engine::general_purpose::STANDARD
                                 .decode(text.as_ref())
@@ -807,7 +810,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
     /// use async_std::net::TcpStream;
     /// #[cfg(feature = "runtime-tokio")]
     /// use tokio::net::TcpStream;
-    /// use futures::TryStreamExt;
+    /// use futures_util::TryStreamExt;
     ///
     /// async fn delete(seq: Seq, s: &mut Session<TcpStream>) -> Result<()> {
     ///     let updates_stream = s.store(format!("{}", seq), "+FLAGS (\\Deleted)").await?;
@@ -1004,7 +1007,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<impl Stream<Item = Result<Name>> + '_ + Send> {
+    ) -> Result<impl Stream<Item = Result<Name>> + '_ + Send + use<'_, T>> {
         let id = self
             .run_command(&format!(
                 "LIST {} {}",
@@ -1040,7 +1043,7 @@ impl<T: Read + Write + Unpin + fmt::Debug + Send> Session<T> {
         &mut self,
         reference_name: Option<&str>,
         mailbox_pattern: Option<&str>,
-    ) -> Result<impl Stream<Item = Result<Name>> + '_ + Send> {
+    ) -> Result<impl Stream<Item = Result<Name>> + '_ + Send + use<'_, T>> {
         let id = self
             .run_command(&format!(
                 "LSUB {} {}",
@@ -1450,10 +1453,9 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
         id: &RequestId,
         unsolicited: Option<channel::Sender<UnsolicitedResponse>>,
     ) -> Result<()> {
-        if let Some(first_res) = self.stream.try_next().await? {
-            self.check_done_ok_from(id, unsolicited, first_res).await
-        } else {
-            Err(Error::ConnectionLost)
+        match self.stream.try_next().await? {
+            Some(first_res) => self.check_done_ok_from(id, unsolicited, first_res).await,
+            _ => Err(Error::ConnectionLost),
         }
     }
 
@@ -1465,13 +1467,16 @@ impl<T: Read + Write + Unpin + fmt::Debug> Connection<T> {
     ) -> Result<()> {
         loop {
             if let Response::Done {
-                status,
-                code,
-                information,
                 tag,
+                status,
+                outcome,
             } = response.parsed()
             {
-                self.check_status_ok(status, code.as_ref(), information.as_deref())?;
+                self.check_status_ok(
+                    status,
+                    outcome.code.as_ref(),
+                    outcome.information.as_deref(),
+                )?;
 
                 if tag == id {
                     return Ok(());
@@ -1529,7 +1534,7 @@ mod tests {
     use std::future::Future;
 
     use async_std::sync::{Arc, Mutex};
-    use futures::StreamExt;
+    use futures_util::StreamExt;
     use imap_proto::Status;
 
     macro_rules! mock_client {
@@ -1579,8 +1584,10 @@ mod tests {
             actual_response.parsed(),
             &Response::Data {
                 status: Status::Ok,
-                code: None,
-                information: Some(Cow::Borrowed("Dovecot ready.")),
+                outcome: imap_proto::Outcome {
+                    code: None,
+                    information: Some(Cow::Borrowed("Dovecot ready."))
+                },
             }
         );
     }
@@ -1645,15 +1652,34 @@ mod tests {
         let command = format!("A0001 LOGIN {} {}\r\n", quote!(username), quote!(password));
         let mock_stream = MockStream::new(response);
         let client = mock_client!(mock_stream);
-        if let Ok(session) = client.login(username, password).await {
-            assert_eq!(
-                session.stream.inner.written_buf,
-                command.as_bytes().to_vec(),
-                "Invalid login command"
-            );
-        } else {
-            unreachable!("invalid login");
+        match client.login(username, password).await {
+            Ok(session) => {
+                assert_eq!(
+                    session.stream.inner.written_buf,
+                    command.as_bytes().to_vec(),
+                    "Invalid login command"
+                );
+            }
+            _ => {
+                unreachable!("invalid login");
+            }
         }
+    }
+
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    async fn login_ignores_completion_for_other_command_tag() {
+        let response = b"A9999 NO Other command rejected\r\n\
+                         A0001 OK Logged in\r\n"
+            .to_vec();
+        let client = mock_client!(MockStream::new(response));
+
+        let result = client.login("username", "password").await;
+
+        assert!(
+            result.is_ok(),
+            "LOGIN must use only its matching completion"
+        );
     }
 
     #[cfg_attr(feature = "runtime-tokio", tokio::test)]
@@ -1682,6 +1708,48 @@ mod tests {
         } else {
             unreachable!("invalid login");
         }
+    }
+
+    /// Test parsing the banner of mail.systemausfall.org as returned on 2026-09-30.
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    async fn banner_en_dash() {
+        let response = b"* OK [CAPABILITY IMAP4rev1 LOGIN-REFERRALS ID ENABLE IDLE SASL-IR LITERAL+ AUTH=PLAIN AUTH=LOGIN AUTH=XOAUTH2] Logged in \xe2\x80\x93 go ahead!\r\n";
+        let mock_stream = MockStream::new(response.to_vec());
+        let mut session = mock_session!(mock_stream);
+        let response_data = session.read_response().await.unwrap().unwrap();
+        let Response::Data { status, .. } = response_data.parsed() else {
+            panic!("Unexpected parsing result: {response_data:?}");
+        };
+        assert!(matches!(status, imap_proto::rfc3501::Status::Ok));
+    }
+
+    /// Example of a string that mail.systemausfall.org returned on 2026-09-14.
+    #[cfg_attr(feature = "runtime-tokio", tokio::test)]
+    #[cfg_attr(feature = "runtime-async-std", async_std::test)]
+    async fn login_with_capabilities_and_en_dash() {
+        let response = b"A0001 OK [CAPABILITY IMAP4rev1 LOGIN-REFERRALS ID ENABLE IDLE SASL-IR LITERAL+ AUTH=PLAIN AUTH=LOGIN AUTH=XOAUTH2] Logged in \xe2\x80\x93 go ahead!\r\n".to_vec();
+        let username = "username";
+        let password = "password";
+        let command = format!("A0001 LOGIN {} {}\r\n", quote!(username), quote!(password));
+        let mock_stream = MockStream::new(response);
+        let client = mock_client!(mock_stream);
+        let (session, capabilities) = client
+            .login_with_capabilities(username, password)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            session.stream.inner.written_buf,
+            command.as_bytes().to_vec(),
+            "Invalid login command"
+        );
+        let capabilities = capabilities.expect("Capabilities should not be None");
+        assert_eq!(capabilities.len(), 10);
+        assert!(capabilities.has(&Capability::Imap4rev1));
+        assert!(!capabilities.has(&Capability::Atom("MOVE".to_string())));
+        assert!(capabilities.has(&Capability::Atom("IDLE".to_string())));
+        assert!(capabilities.has(&Capability::Atom("ID".to_string())));
     }
 
     /// Tests that `login_with_capabilities()` returns None
@@ -2283,7 +2351,7 @@ mod tests {
     #[test]
     fn validate_newline() {
         if let Err(ref e) = validate_str("test\nstring") {
-            if let Error::Validate(ref ve) = e {
+            if let Error::Validate(ve) = e {
                 if ve.0 == '\n' {
                     return;
                 }
@@ -2297,7 +2365,7 @@ mod tests {
     #[allow(unreachable_patterns)]
     fn validate_carriage_return() {
         if let Err(ref e) = validate_str("test\rstring") {
-            if let Error::Validate(ref ve) = e {
+            if let Error::Validate(ve) = e {
                 if ve.0 == '\r' {
                     return;
                 }
@@ -2344,7 +2412,9 @@ mod tests {
             }
             let body_len = body.len();
 
-            let response = format!("* {id} FETCH (RFC822.SIZE {body_len} BODY[] {{{body_len}}}\r\n{body} FLAGS (\\Seen))\r\n");
+            let response = format!(
+                "* {id} FETCH (RFC822.SIZE {body_len} BODY[] {{{body_len}}}\r\n{body} FLAGS (\\Seen))\r\n"
+            );
             writer.write_all(response.as_bytes()).await?;
             writer
                 .write_all(format!("{request_id} OK FETCH completed\r\n").as_bytes())
@@ -2367,7 +2437,7 @@ mod tests {
         tokio::test(flavor = "multi_thread", worker_threads = 2)
     )]
     async fn large_fetch() -> Result<()> {
-        use futures::TryStreamExt;
+        use futures_util::TryStreamExt;
 
         let (client, server) = tokio::io::duplex(4096);
         tokio::spawn(handle_client(server));
@@ -2709,12 +2779,14 @@ mod tests {
         let command = "A0001 NOOP\r\n";
         let mock_stream = MockStream::new(response);
         let mut session = mock_session!(mock_stream);
-        assert!(session
-            .noop()
-            .await
-            .unwrap_err()
-            .to_string()
-            .contains("220 mail.example.org ESMTP Postcow"));
+        assert!(
+            session
+                .noop()
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("220 mail.example.org ESMTP Postcow")
+        );
         assert!(
             session.stream.inner.written_buf == command.as_bytes().to_vec(),
             "Invalid NOOP command"

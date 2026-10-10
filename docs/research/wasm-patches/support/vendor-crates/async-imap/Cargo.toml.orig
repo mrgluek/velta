@@ -1,6 +1,6 @@
 [package]
 name = "async-imap"
-version = "0.11.3"
+version = "0.12.0"
 authors = ["dignifiedquire <me@dignifiedquire.com>"]
 documentation = "https://docs.rs/async-imap/"
 repository = "https://github.com/async-email/async-imap"
@@ -8,7 +8,8 @@ homepage = "https://github.com/async-email/async-imap"
 description = "Async IMAP client for Rust"
 readme = "README.md"
 license = "MIT OR Apache-2.0"
-edition = "2021"
+edition = "2024"
+rust-version = "1.88"
 
 keywords = ["email", "imap"]
 categories = ["email", "network-programming"]
@@ -29,13 +30,13 @@ runtime-tokio = ["tokio", "async-compression?/tokio"]
 async-channel = "2.0.0"
 async-compression = { version = "0.4.15", default-features = false, features = ["deflate"], optional = true }
 async-std = { version = "1.8.0", default-features = false, features = ["std", "unstable"], optional = true }
-base64 = "0.22.1"
+base64 = { version = "0.23.1", default-features = false, features = ["std"] }
 bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-futures = "0.3.15"
-imap-proto = "0.16.4"
+futures-util = {version = "0.3.15", features = ["io"] }
+imap-proto = "0.17"
 log = "0.4.8"
-nom = "7.0"
+nom = "8.0"
 pin-project = "1"
 pin-utils = "0.1.0-alpha.4"
 self_cell = "1.0.1"

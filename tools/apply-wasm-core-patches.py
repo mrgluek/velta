@@ -7,8 +7,8 @@ Velta-owned forward-port of chatmail/core 2.62+ for wasm32. Reuses MPL patch
 Relationship to tools/apply-core-patches.py:
   - apply-core-patches.py  → Velta's production quilt (Android/desktop;
                               21 ops at core 2.63.0, 13 at this series' 2.62
-                              baseline). This 10-patch series is FROZEN at
-                              2.62: it does not apply to 2.63.0.
+                              baseline). This 10-patch series quilt-refreshed
+                              for 2.63.0 in #112.
   - THIS script            → wasm32 ports; MUST stay opt-in.
 
 Safety:
@@ -154,11 +154,17 @@ def apply_patches_to_core(core_dir: Path) -> None:
     patches = series_patches()
     if not patches:
         die("no patches in docs/research/wasm-patches/series/")
+    # Stop git's upward repo discovery at the copy: if the copy lives inside
+    # the Velta repo (default .wasm-core-apply dest), git apply discovers the
+    # parent repo and silently skips every hunk ("Skipped patch '...'",
+    # exit 0). CI is immune (dest is in RUNNER_TEMP). #112.
+    env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(core_dir.parent))
     for patch in patches:
         print(f"Applying {patch.name}")
         r = subprocess.run(
             ["git", "apply", "--whitespace=nowarn", str(patch)],
             cwd=core_dir,
+            env=env,
             capture_output=True,
             text=True,
         )

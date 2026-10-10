@@ -98,9 +98,9 @@ Legend: ✅ done on the opt-in copy (evidence linked) · ⬜ open · ⛔ blocker
   | libsqlite3-sys (`bundled-sqlcipher-vendored-openssl`) | 0.35.0 | **0.38.2** | bundled **SQLCipher 4.6.1 → 4.14.0** (SQLite 3.46.1 → 3.51.3). Same SQLCipher 4 file format. ✅ **Day 11 upgrade + rollback PASS** on a real-schema Velta DB (dbversion 167, WAL) created by stock core, plaintext (Velta default) **and** legacy passphrase mode: 4.6.1 create → 4.14.0 open/write → 4.6.1 reopen/write → 4.14.0 reopen, `integrity_check=ok` and all rows at every hop (harness: `wasm-patches/sqlcipher-harness/`). Remaining: same test on a copied **production** Android/desktop DB (older dbversion → migrations under the new engine) |
   | hashlink | 0.10.0 | 0.12.2 | rusqlite statement cache; internal |
   | tokio | 1.53.1 | 1.53.1 (via `velta-tokio-wasm`) | facade only: native build is `pub use tokio::*`, nothing else compiled (Day 12) |
-  | async-imap | 0.11.3 crates.io | 0.11.3 **vendored** | 2 files / 10 lines, all `cfg`-gated (idle timeout import) |
-  | astral-tokio-tar | 0.6.4 | **0.6.4 vendored** (Day 11 rebase) | ✅ downgrade removed: vendor = crates.io 0.6.4 + 61 wasm lines; native lock now 0.6.4 + rustix 1.1.4 like stock. Ungated: `canonicalize` via `tokio::fs` (same result, blocking pool). Day 11 nextest 1135/1135 |
-  | mail-builder | 0.5.0 crates.io | 0.5.0 **vendored** | 3 files / 88 lines, `SystemTime` imports `cfg`-gated |
+  | async-imap | 0.12.0 crates.io (2.63) | 0.12.0 **vendored** | 2 files / 10 lines, all `cfg`-gated (idle timeout import); #112 re-vendor |
+  | astral-tokio-tar | 0.6.4 | **0.6.4 vendored** (Day 11 rebase) | ✅ downgrade removed: vendor = crates.io 0.6.4 + 61 wasm lines; native lock now 0.6.4 + rustix 1.1.4 like stock. Ungated: `canonicalize` via `tokio::fs` (same result, blocking pool). Day 11 nextest 1135/1135. 2.63 note (#112): stock `core/` declares 0.7.0; the series pins `=0.6.4` — wasm-copy-only downgrade, production `core/` untouched |
+  | mail-builder | 1.0.0 crates.io (2.63) | 1.0.0 **vendored** | 3 files / ~88 lines, `SystemTime` imports `cfg`-gated; #112 re-vendor |
   | wasm-bindgen / js-sys / web-sys / sqlite-wasm-rs / wasmtimer / indexed_db_futures | 0.2.100 … | 0.2.129 … | **not in native graphs** (wasm-only) |
 
   Native crate bumps need release-notes mention and their own native test
@@ -220,8 +220,9 @@ Native builds must not change behaviour because of the wasm patches.
 
 - ⬜ Review vendored crates against upstream (they ship on native too).
   Day 11 machine diff vs crates.io `src/`: astral-tokio-tar 0.6.4 **61**
-  changed lines, async-imap 0.11.3 **6**, mail-builder 0.5.0 **17** (all
-  listed in VENDORED.md §A). Human review still open.
+  changed lines, async-imap **6**, mail-builder **17** (all
+  listed in VENDORED.md §A). Human review still open. #112 re-vendored
+  async-imap 0.12.0 + mail-builder 1.0.0 with the same deltas.
 - ⬜ Line-by-line review of the series by someone other than the author
   (agent-written patches need human review), focusing on: TLS clock
   provider, `ws_tcp` DNS/connect path, `http_wasm` fetch, blob memfs.
