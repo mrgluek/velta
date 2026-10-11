@@ -18,7 +18,9 @@ android {
     namespace = "org.velta"
     defaultConfig {
         manifestPlaceholders["usesCleartextTraffic"] = "false"
-        applicationId = "org.velta"
+        // Fork build with the optional DNS tunnel: its own package so it installs
+        // next to upstream Velta. The Kotlin namespace stays org.velta.
+        applicationId = "org.velta.tunnel"
         minSdk = 24
         targetSdk = 36
         versionCode = tauriProperties.getProperty("tauri.android.versionCode", "1").toInt()
@@ -50,6 +52,10 @@ android {
     buildFeatures {
         buildConfig = true
     }
+    // Optional DNS tunnel library (velta-app/soar-tunnel, libsoartunnel.so),
+    // built by CI into its own folder so Tauri's jniLibs handling never
+    // touches it. Missing folder = upstream behavior (tunnel.rs checks).
+    sourceSets.getByName("main").jniLibs.srcDir("src/main/soarLibs")
 }
 
 rust {

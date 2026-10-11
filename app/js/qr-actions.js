@@ -55,6 +55,7 @@ export function classifyScannedCode(code, { parseInviteLink, isShortInviteLink }
   if (!s) return null;
   if (/^dcbackup\d*:/i.test(s)) return "backup";
   if (/^(dcaccount|dclogin):/i.test(s)) return "relay";
+  if (/^velta:\/\/tunnel/i.test(s)) return "tunnel"; // DNS tunnel setup (tunnel.js)
   if (parseInviteLink(s)) return "invite";
   if (isShortInviteLink(s)) return "short";
   return null;

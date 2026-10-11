@@ -1,0 +1,96 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus } = await import("../app/js/tunnel.js");
+const { classifyScannedCode } = await import("../app/js/qr-actions.js");
+
+const LINK = "velta://tunnel?v=1&zone=t.example.org&key=AAAA";
+
+test("only velta://tunnel links are tunnel links", () => {
+  assert.equal(extractTunnelLink(`  ${LINK} `), LINK);
+  assert.equal(extractTunnelLink("VELTA://tunnel?zone=x"), "VELTA://tunnel?zone=x");
+  assert.equal(extractTunnelLink("velta://chat?chat=1&t=x"), null);
+  assert.equal(extractTunnelLink("velta://tunnelx?zone=x"), null);
+  assert.equal(extractTunnelLink("https://example.org/velta://tunnel"), null);
+  assert.equal(extractTunnelLink(null), null);
+});
+
+test("a scanned tunnel QR is routed to the deep-link handler", () => {
+  const deps = { parseInviteLink: () => null, isShortInviteLink: () => false };
+  assert.equal(classifyScannedCode(LINK, deps), "tunnel");
+});
+
+test("status lines", () => {
+  assert.equal(describeTunnel({ installed: false }).headline, "Not set up");
+  assert.equal(describeTunnel({ installed: true, available: false, error: "no lib" }).headline, "Not running");
+  assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "off", route: "direct" }).headline, "Off");
+  assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "tunnel", state: "blocked" }).headline, "Through the tunnel");
+  assert.match(describeTunnel({ installed: true, available: true, running: true, mode: "always", route: "tunnel" }).detail, /Always/);
+  assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "offline" }).headline, "No network");
+  assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "direct" }).headline, "Direct");
+});
+
+test("report carries routing state and events only", () => {
+  const text = tunnelReport({
+    zone: "t.example.org", resolvers: 21, soar: "v0.1", mode: "auto", route: "tunnel", state: "blocked",
+    last_result: { relays: 2, relay_ok: 0, canary_ok: true }, relays: ["relay.example.org"],
+    active: { direct: 0, tunnel: 2 }, stats: { tunnel: { conns: 5, fails: 1, up: 2048, down: 4096 } },
+    events: [{ t: "2026-10-11T10:00:00Z", msg: "route direct -> tunnel (blocked)" }],
+  }, { app: "1.4.65", now: new Date("2026-10-11T10:05:00Z") });
+  assert.match(text, /relays ok 0\/2 {2}canary ok: true/);
+  assert.match(text, /tunnel: active 2, conns 5, fails 1, up 2 KB, down 4 KB/);
+  assert.match(text, /route direct -> tunnel \(blocked\)/);
+  assert.doesNotMatch(text, /pass|user/i);
+});
+
+function fakeShell(calls, { status = { installed: true, available: true, running: true } } = {}) {
+  return async (cmd, args) => {
+    calls.push([cmd, args]);
+    if (cmd === "tunnel_preview") return { zone: "t.example.org", resolvers: 21 };
+    if (cmd === "tunnel_status") return status;
+    return null;
+  };
+}
+
+test("a declined link changes nothing", async () => {
+  const calls = [];
+  let asked = "";
+  const ok = await acceptTunnelLink(LINK, {
+    invoke: fakeShell(calls),
+    confirmModal: async (title, text) => { asked = text; return false; },
+    toast() {}, errToast() {},
+  });
+  assert.equal(ok, false);
+  assert.match(asked, /t\.example\.org/);
+  assert.deepEqual(calls.map(c => c[0]), ["tunnel_preview"]);
+});
+
+test("an accepted link installs, refreshes and notifies", async () => {
+  const calls = [];
+  let changed = false;
+  await refreshTunnelStatus(0, async () => ({ installed: false }));
+  assert.equal(tunnelInstalled(), false);
+  const ok = await acceptTunnelLink(LINK, {
+    invoke: fakeShell(calls),
+    confirmModal: async () => true,
+    toast() {}, errToast() {},
+    onChange: () => { changed = true; },
+  });
+  assert.equal(ok, true);
+  assert.deepEqual(calls.map(c => c[0]), ["tunnel_preview", "tunnel_install", "tunnel_status"]);
+  assert.deepEqual(calls[1][1], { link: LINK });
+  assert.equal(tunnelInstalled(), true);
+  assert.equal(changed, true);
+});
+
+test("a rejected link never reaches the confirmation", async () => {
+  let asked = false, err = "";
+  const ok = await acceptTunnelLink(LINK, {
+    invoke: async () => { throw new Error("key must be 32 bytes"); },
+    confirmModal: async () => { asked = true; return true; },
+    toast() {}, errToast: (m) => { err = m; },
+  });
+  assert.equal(ok, false);
+  assert.equal(asked, false);
+  assert.match(err, /32 bytes/);
+});

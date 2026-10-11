@@ -19,6 +19,7 @@ import { acquireCode, mountScanner } from "./qr-scan.js";
 import { scanTabAvailable, canShareLink, copyLink, shareLink, classifyScannedCode } from "./qr-actions.js";
 import { parseSharePayload, shareTextIfUnconsumed, sharePlan, createShareInbox, buildSharePicker } from "./share-in.js";
 import { linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_LABELS } from "./link-preview.js";
+import { extractTunnelLink, acceptTunnelLink, openTunnelSettings, refreshTunnelStatus, tunnelInstalled, tunnelStatus, describeTunnel, bindTunnelNetworkEvents } from "./tunnel.js";
 import { wrapIdentityBundle, unwrapIdentityBundle, buildIdentityBundle, bytesToBase64, base64ToBytes, backupDownloadName, gzipBytes } from "./identity-backup.js";
 
 const diagnostics = new DiagnosticsStore();
@@ -3772,6 +3773,13 @@ async function handleDeeplinkFromUrl(rawUrl, { clearUrl = false } = {}) {
     if (chatLinkToken && chatLink.token === chatLinkToken) await openChatFromLink(chatLink);
     return true;
   }
+  // DNS tunnel setup link (fork build): confirmed by the user before anything changes.
+  const tunnelLink = extractTunnelLink(rawUrl);
+  if (tunnelLink) {
+    if (clearUrl) history.replaceState(null, "", location.pathname + location.search);
+    await acceptTunnelLink(tunnelLink, { confirmModal, toast, errToast, onChange: rebuildDrawer });
+    return true;
+  }
   const velta = extractVeltaLink(rawUrl);
   if (velta) rawUrl = velta;
   const backupLink = extractBackupLink(rawUrl);
@@ -4277,6 +4285,10 @@ function rebuildDrawer() {
     onProfile: openSelfProfile,
     onEditProfile: editProfileFlow,
     onInviteDomains: () => showInviteDomainsModal(),
+    onTunnel: tunnelInstalled()
+      ? () => openTunnelSettings({ showModal, confirmModal, toast, errToast, onChange: rebuildDrawer })
+      : null,
+    tunnelLabel: describeTunnel(tunnelStatus()).headline,
     onOpenChat: async kind => {
       if (state.accountChanging) return;
       const epoch = core.accountEpoch;
@@ -5410,6 +5422,10 @@ async function boot() {
         toast("Reconnected to Delta Chat core", 2500);
       })();
     });
+
+    // Optional DNS tunnel: show its drawer row only once one is installed.
+    refreshTunnelStatus().then(s => { if (s.installed) rebuildDrawer(); });
+    bindTunnelNetworkEvents();
 
     appLog("boot: handleDeeplink");
     // Before any chat link is routed: a cold-start notification is parked in
