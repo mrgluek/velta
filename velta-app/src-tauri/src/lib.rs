@@ -2324,6 +2324,151 @@ async fn resolve_content_uri(app: tauri::AppHandle, uri: String, filename: Strin
         .map_err(|e| e.to_string())?
 }
 
+/// Cache directory the core can write a backup tar into. Android then copies
+/// that tar onto the content URI from the system save dialog.
+#[tauri::command]
+fn backup_scratch_dir(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|e| e.to_string())?
+        .join("backup-export");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.to_string_lossy().into_owned())
+}
+
+fn newest_backup_tar(dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let mut best: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("tar") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        if best.as_ref().map(|(t, _)| modified >= *t).unwrap_or(true) {
+            best = Some((modified, path));
+        }
+    }
+    best.map(|(_, path)| path).ok_or_else(|| "the core produced no backup file".into())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+async fn publish_backup(_dir: String, _uri: String) -> Result<(), String> {
+    Err("saving a backup to a chosen location is only supported on Android".into())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+async fn publish_backup(dir: String, uri: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || publish_backup_blocking(dir, uri))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[cfg(target_os = "android")]
+fn publish_backup_blocking(dir: String, uri: String) -> Result<(), String> {
+    let src = newest_backup_tar(std::path::Path::new(&dir))?;
+    let copied = copy_path_to_content_uri(&src, &uri);
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("tar") {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+    copied
+}
+
+#[cfg(target_os = "android")]
+fn copy_path_to_content_uri(src: &std::path::Path, uri: &str) -> Result<(), String> {
+    let ctx_guard = APP_CONTEXT.lock().unwrap();
+    let context = ctx_guard
+        .as_ref()
+        .map(|r| r.as_obj().clone())
+        .ok_or("application context was not handed over yet")?;
+    let vm_guard = APP_JAVA_VM.lock().unwrap();
+    let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
+    let mut env = vm_ref.attach_current_thread().map_err(|e| format!("jvm attach: {e}"))?;
+
+    let uri_j = env.new_string(uri).map_err(|e| e.to_string())?;
+    let uri_class = env.find_class("android/net/Uri").map_err(|e| e.to_string())?;
+    let uri_obj = env
+        .call_static_method(&uri_class, "parse", "(Ljava/lang/String;)Landroid/net/Uri;", &[(&uri_j).into()])
+        .map_err(|e| e.to_string())?
+        .l()
+        .map_err(|e| e.to_string())?;
+    let cr = env
+        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
+        .map_err(|e| e.to_string())?
+        .l()
+        .map_err(|e| e.to_string())?;
+    let os = env
+        .call_method(&cr, "openOutputStream", "(Landroid/net/Uri;)Ljava/io/OutputStream;", &[(&uri_obj).into()])
+        .map_err(|e| e.to_string())?
+        .l()
+        .map_err(|e| e.to_string())?;
+    if env.exception_check().map_err(|e| e.to_string())? || os.is_null() {
+        let _ = env.exception_clear();
+        return Err("openOutputStream failed for this save location".into());
+    }
+
+    let src_str = src.to_string_lossy().into_owned();
+    let src_j = env.new_string(&src_str).map_err(|e| e.to_string())?;
+    let is = env
+        .new_object("java/io/FileInputStream", "(Ljava/lang/String;)V", &[(&src_j).into()])
+        .map_err(|e| e.to_string())?;
+    let buf = env.new_byte_array(64 * 1024).map_err(|e| e.to_string())?;
+    let buf_obj: jni::objects::JObject = buf.into();
+    let mut copy_result: Result<(), String> = Ok(());
+    loop {
+        if copy_result.is_err() {
+            break;
+        }
+        let n = match env.call_method(&is, "read", "([B)I", &[(&buf_obj).into()]) {
+            Ok(v) => match v.i() {
+                Ok(n) => n,
+                Err(e) => {
+                    copy_result = Err(format!("FileInputStream.read: {e}"));
+                    break;
+                }
+            },
+            Err(e) => {
+                copy_result = Err(format!("FileInputStream.read: {e}"));
+                break;
+            }
+        };
+        if n < 0 {
+            break;
+        }
+        if let Err(e) = env.call_method(
+            &os,
+            "write",
+            "([BII)V",
+            &[(&buf_obj).into(), jni::objects::JValue::Int(0), jni::objects::JValue::Int(n)],
+        ) {
+            copy_result = Err(format!("OutputStream.write: {e}"));
+            break;
+        }
+    }
+    if let Err(e) = env.call_method(&os, "flush", "()V", &[]) {
+        log(&format!("output stream flush: {e}"));
+    }
+    if let Err(e) = env.call_method(&os, "close", "()V", &[]) {
+        log(&format!("output stream close: {e}"));
+    }
+    if let Err(e) = env.call_method(&is, "close", "()V", &[]) {
+        log(&format!("input stream close: {e}"));
+    }
+    let _ = env.exception_clear();
+    copy_result
+}
+
 /// PWA backup downloads arrive gzip-compressed (CompressionStream export);
 /// the core's imex only reads plain tars. Sniff the gzip magic and
 /// decompress to a temp file when needed; anything else passes through.
@@ -3702,7 +3847,7 @@ pub fn run() {
                 responder.respond(response);
             });
         })
-        .invoke_handler(tauri::generate_handler![js_log, rpc, set_ui_visible, get_event_reader_mode, events_listener_ready, battery_optimization_exempt, request_battery_exemption, get_latest_version, download_update, fetch_page_title, expand_invite_link, fetch_link_preview, probe_relay, allow_picked_path, webxdc_begin, set_notify_prefs, get_notify_prefs, set_logging_enabled, set_devtools, open_in_app_browser, open_webview_browser, get_initial_deeplink, take_opened_urls, chat_link_token, get_sidecar_status, get_accounts_dir, resolve_upload_path, resolve_content_uri, prep_backup, media_base_url, poster_cache_path, read_media_bytes, write_poster, notify_incoming, install_update, get_battery_status, share_text, p2p::p2p_status, p2p::p2p_set_enabled, p2p::p2p_set_name, p2p::p2p_create_invite, p2p::p2p_accept_invite, p2p::p2p_send, p2p::p2p_send_file, p2p::p2p_remove_peer, p2p::p2p_messages, p2p::p2p_retry, p2p::p2p_pair_nearby, p2p::p2p_approve_pair, p2p::p2p_groups, p2p::p2p_group_create, p2p::p2p_group_add, p2p::p2p_group_remove, p2p::p2p_group_rename, p2p::p2p_group_disband, p2p::p2p_group_leave, p2p::p2p_group_delete, p2p::p2p_peer_groups, p2p::p2p_typing, p2p::p2p_group_send, p2p::p2p_group_send_file, p2p::p2p_group_file_retry, p2p::p2p_group_messages]);
+        .invoke_handler(tauri::generate_handler![js_log, rpc, set_ui_visible, get_event_reader_mode, events_listener_ready, battery_optimization_exempt, request_battery_exemption, get_latest_version, download_update, fetch_page_title, expand_invite_link, fetch_link_preview, probe_relay, allow_picked_path, webxdc_begin, set_notify_prefs, get_notify_prefs, set_logging_enabled, set_devtools, open_in_app_browser, open_webview_browser, get_initial_deeplink, take_opened_urls, chat_link_token, get_sidecar_status, get_accounts_dir, resolve_upload_path, resolve_content_uri, prep_backup, backup_scratch_dir, publish_backup, media_base_url, poster_cache_path, read_media_bytes, write_poster, notify_incoming, install_update, get_battery_status, share_text, p2p::p2p_status, p2p::p2p_set_enabled, p2p::p2p_set_name, p2p::p2p_create_invite, p2p::p2p_accept_invite, p2p::p2p_send, p2p::p2p_send_file, p2p::p2p_remove_peer, p2p::p2p_messages, p2p::p2p_retry, p2p::p2p_pair_nearby, p2p::p2p_approve_pair, p2p::p2p_groups, p2p::p2p_group_create, p2p::p2p_group_add, p2p::p2p_group_remove, p2p::p2p_group_rename, p2p::p2p_group_disband, p2p::p2p_group_leave, p2p::p2p_group_delete, p2p::p2p_peer_groups, p2p::p2p_typing, p2p::p2p_group_send, p2p::p2p_group_send_file, p2p::p2p_group_file_retry, p2p::p2p_group_messages]);
 
     builder = builder.plugin(tauri_plugin_notification::init());
 
