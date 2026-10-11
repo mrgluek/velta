@@ -127,7 +127,9 @@ class MainActivity : TauriActivity() {
   // broken composer at large scales (user report on a 320px-viewport device).
   // The coherent alternative lives in the app itself: drawer -> Interface
   // scale (zoom on <html>, see ui.js). The WebView is created by the Tauri
-  // runtime some time after onCreate, hence the bounded retry.
+  // runtime some time after onCreate, hence the bounded retry. The same hook
+  // swaps in VeltaWebChromeClient for real fullscreen video (#111) — wry's
+  // stock client refuses custom views and strands the status bar hidden.
   private var textZoomApplied = false
   private val textZoomFix = object : Runnable {
     override fun run() {
@@ -135,6 +137,11 @@ class MainActivity : TauriActivity() {
       val wb = findWebView(window?.decorView, 0)
       if (wb != null) {
         wb.settings.textZoom = 100
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+          wb.webChromeClient?.let {
+            wb.setWebChromeClient(VeltaWebChromeClient(it, this@MainActivity))
+          }
+        }
         textZoomApplied = true
         return
       }
