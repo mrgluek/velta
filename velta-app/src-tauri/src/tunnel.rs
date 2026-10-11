@@ -35,7 +35,8 @@ mod imp {
         stop: VoidFn,
         status: StatusFn,
         set_mode: StrFn,
-        net_changed: VoidFn,
+        // Loaded to check the ABI; network changes restart the tunnel instead.
+        _net_changed: VoidFn,
         free: FreeFn,
     }
 
@@ -67,9 +68,9 @@ mod imp {
             let stop = sym!(b"VeltaTunnelStop\0", VoidFn);
             let status = sym!(b"VeltaTunnelStatus\0", StatusFn);
             let set_mode = sym!(b"VeltaTunnelSetMode\0", StrFn);
-            let net_changed = sym!(b"VeltaTunnelNetworkChanged\0", VoidFn);
+            let _net_changed = sym!(b"VeltaTunnelNetworkChanged\0", VoidFn);
             let free = sym!(b"VeltaTunnelFree\0", FreeFn);
-            Ok(Lib { _lib: l, parse, start, stop, status, set_mode, net_changed, free })
+            Ok(Lib { _lib: l, parse, start, stop, status, set_mode, _net_changed, free })
         })
         .as_ref()
         .map_err(|e| e.clone())
@@ -174,7 +175,7 @@ mod imp {
 
     /// Restarts the tunnel when the network's resolvers or the operator
     /// changed (Wi-Fi <-> mobile, SIM swap): soar's path set is fixed per
-    /// client. Otherwise only asks the router for a re-check.
+    /// client, and the restart re-probes the network from scratch.
     fn check_network(app: &tauri::AppHandle) {
         let _g = OP.lock().unwrap();
         if PROXY_URL.lock().unwrap().is_none() {
@@ -324,11 +325,10 @@ mod imp {
         Ok(())
     }
 
+    /// The WebView reports a "change" on every mobile bandwidth estimate, so
+    /// only a real change of resolvers/operator does anything (a restart).
     pub fn network_changed(app: &tauri::AppHandle) {
         check_network(app);
-        if let Ok(lib) = lib() {
-            unsafe { (lib.net_changed)() };
-        }
     }
 }
 

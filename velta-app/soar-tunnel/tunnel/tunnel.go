@@ -87,6 +87,10 @@ type Tunnel struct {
 	lastProbe  time.Time
 	lastResult probeResult
 	stats      [2]routeStats
+	// Bytes per route, counted as they flow: IMAP IDLE connections live for
+	// hours, so totals taken at close would show nothing for them.
+	upBytes   [2]atomic.Int64
+	downBytes [2]atomic.Int64
 }
 
 type tracked struct {
@@ -211,12 +215,11 @@ func (t *Tunnel) SetMode(mode string) error {
 	return nil
 }
 
-// NetworkChanged asks for an immediate re-check (Wi-Fi <-> mobile, airplane mode).
+// NetworkChanged asks for an immediate re-check (Wi-Fi <-> mobile, airplane
+// mode). The streaks are kept: mobile WebViews report a "change" on every
+// bandwidth estimate update, and resetting would keep auto mode from ever
+// reaching its thresholds. A real network switch restarts the tunnel anyway.
 func (t *Tunnel) NetworkChanged() {
-	t.mu.Lock()
-	t.failStreak, t.okStreak = 0, 0
-	t.mu.Unlock()
-	t.log.add("network changed")
 	t.kickProbe()
 }
 
@@ -303,14 +306,12 @@ func (t *Tunnel) handle(c net.Conn) {
 	var up, down atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); up.Store(pipe(remote, c)) }()
-	go func() { defer wg.Done(); down.Store(pipe(c, remote)) }()
+	go func() { defer wg.Done(); pipe(remote, c, &up, &t.upBytes[route]) }()
+	go func() { defer wg.Done(); pipe(c, remote, &down, &t.downBytes[route]) }()
 	wg.Wait()
 
 	t.mu.Lock()
 	delete(t.conns, tr)
-	t.stats[route].Up += up.Load()
-	t.stats[route].Down += down.Load()
 	t.mu.Unlock()
 	// A direct connection that died young with almost nothing received is
 	// what a TLS-cutting allowlist looks like from here: check now instead
@@ -348,15 +349,27 @@ func (t *Tunnel) dial(addr string) (net.Conn, Route, error) {
 	return c, RouteTunnel, err
 }
 
-// pipe copies src to dst, then half-closes dst so the peer sees EOF.
-func pipe(dst, src net.Conn) int64 {
-	n, _ := io.Copy(dst, src)
+// pipe copies src to dst, counting bytes into conn and route as they flow,
+// then half-closes dst so the peer sees EOF.
+func pipe(dst, src net.Conn, conn, route *atomic.Int64) {
+	io.Copy(countingWriter{dst, conn, route}, src)
 	if cw, ok := dst.(interface{ CloseWrite() error }); ok {
 		cw.CloseWrite()
 	} else {
 		dst.Close()
 	}
-	return n
+}
+
+type countingWriter struct {
+	w           io.Writer
+	conn, route *atomic.Int64
+}
+
+func (c countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.conn.Add(int64(n))
+	c.route.Add(int64(n))
+	return n, err
 }
 
 func (t *Tunnel) monitor() {
@@ -556,7 +569,7 @@ func (t *Tunnel) Status(n int) Status {
 		LastProbe:  t.lastProbe.UTC(),
 		LastResult: t.lastResult,
 		Active:     map[string]int{"direct": 0, "tunnel": 0},
-		Stats:      map[string]routeStats{"direct": t.stats[RouteDirect], "tunnel": t.stats[RouteTunnel]},
+		Stats:      map[string]routeStats{"direct": t.routeStatsLocked(RouteDirect), "tunnel": t.routeStatsLocked(RouteTunnel)},
 		Soar:       soarVersion(),
 	}
 	for h := range t.relays {
@@ -567,6 +580,12 @@ func (t *Tunnel) Status(n int) Status {
 		s.Active[c.route.String()]++
 	}
 	s.Events = t.log.last(n)
+	return s
+}
+
+func (t *Tunnel) routeStatsLocked(r Route) routeStats {
+	s := t.stats[r]
+	s.Up, s.Down = t.upBytes[r].Load(), t.downBytes[r].Load()
 	return s
 }
 

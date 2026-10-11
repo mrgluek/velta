@@ -143,8 +143,13 @@ export async function acceptTunnelLink(link, { confirmModal, toast, errToast, on
 /** Re-check routing after a network switch (Wi-Fi <-> mobile, airplane mode). */
 export function bindTunnelNetworkEvents(invoke = shellInvoke()) {
   if (!invoke) return;
+  // Mobile WebViews fire "change" on every bandwidth/RTT estimate; the shell
+  // only acts on a real resolver/operator change, so a few calls are plenty.
+  let last = 0;
   const kick = () => {
-    if (cached.installed) invoke("tunnel_network_changed").catch(() => {});
+    if (!cached.installed || Date.now() - last < 5000) return;
+    last = Date.now();
+    invoke("tunnel_network_changed").catch(() => {});
   };
   globalThis.navigator?.connection?.addEventListener?.("change", kick);
   globalThis.window?.addEventListener?.("online", kick);

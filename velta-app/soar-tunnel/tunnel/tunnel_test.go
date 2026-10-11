@@ -332,3 +332,26 @@ func TestEffectiveOrder(t *testing.T) {
 		t.Fatalf("unknown operator adds nothing")
 	}
 }
+
+func TestBytesCountedWhileOpen(t *testing.T) {
+	var n atomic.Int32
+	// Echo forever: the connection stays open like IMAP IDLE.
+	echo := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		n.Add(1)
+		a, b := net.Pipe()
+		go func() { io.Copy(b, b) }()
+		return a, nil
+	}
+	tt := newTestTunnel(t, ModeAlways, echo, echo)
+	c, code := socksConnect(t, tt.Addr(), "u", "p", "relay.example.org:993")
+	if code != repSucceeded {
+		t.Fatalf("connect failed: %d", code)
+	}
+	defer c.Close()
+	c.Write([]byte("hello"))
+	io.ReadFull(c, make([]byte, 5))
+	st := tt.Status(0).Stats["tunnel"]
+	if st.Up != 5 || st.Down != 5 || st.Conns != 1 {
+		t.Fatalf("live counters on an open connection: %+v", st)
+	}
+}
