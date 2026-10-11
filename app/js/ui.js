@@ -618,7 +618,7 @@ function notifyChecked(storageKey) {
 
 const isAndroid = /Android/i.test(typeof navigator !== "undefined" ? navigator.userAgent : "");
 
-export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenChat, onInvite, onProfile, onEditProfile, onInviteDomains, onWsRelays, p2pAvailable = false, p2pOn = false, onP2pToggle, onRelays, accounts = [], currentAccountId = null, onAccountTap, theme, barHidden = [], onBarToggle, catsHidden = [], onCatToggle, mediaQuality = "0", onMediaQuality, downloadLimit = "0", onDownloadLimit, onReadReceipts, onLowBatteryToggle, multiDevice = false, onMultiDevice, onDrawerOpen, identityBackupAvailable = false, onIdentityBackup }) {
+export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenChat, onInvite, onProfile, onEditProfile, onInviteDomains, onWsRelays, p2pAvailable = false, p2pOn = false, onP2pToggle, onRelays, accounts = [], currentAccountId = null, onAccountTap, theme, barHidden = [], onBarToggle, catsHidden = [], onCatToggle, mediaQuality = "0", onMediaQuality, downloadLimit = "0", onDownloadLimit, onReadReceipts, onLowBatteryToggle, multiDevice = false, onMultiDevice, onDrawerOpen, identityBackupAvailable = false, onIdentityBackup, onTunnel = null, tunnelLabel = "" }) {
   const isTauri = !!window.__TAURI__;
   const drawer = document.createElement("div");
   drawer.className = "drawer";
@@ -714,6 +714,7 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
       </details>
       <button type="button" class="ctx-item" data-act="profile-management"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 20a8 8 0 0116 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M19 5v4M21 7h-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Profile management…</span></button>
       <button type="button" class="ctx-item" data-act="relays"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Relays of this profile…</span></button>
+      ${onTunnel ? `<button type="button" class="ctx-item" data-act="tunnel"><svg viewBox="0 0 24 24"><path d="M3 20V11a9 9 0 0118 0v9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M8 20v-7a4 4 0 018 0v7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>DNS tunnel: ${escapeHtml(tunnelLabel)}</span></button>` : ""}
       ${onWsRelays ? `<button type="button" class="ctx-item" data-act="ws-relays"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>WebSocket relays</span></button>` : ""}
       ${identityBackupAvailable ? `<button type="button" class="ctx-item" data-act="identity-backup"><svg viewBox="0 0 24 24"><circle cx="8" cy="14" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M11 11l8-8M17 5l3 3M14 8l2.5 2.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Identity backup…</span></button>` : ""}
       <button type="button" class="ctx-item" data-act="invite-domains"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18" fill="none" stroke="currentColor" stroke-width="2"/></svg><span>Invite link domains</span></button>
@@ -1032,6 +1033,7 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
     if (act === "relays") onRelays?.();
     if (act === "ws-relays") onWsRelays?.();
     if (act === "invite-domains") onInviteDomains?.();
+    if (act === "tunnel") onTunnel?.();
     if (act === "identity-backup") onIdentityBackup?.();
     if (act === "about") showAbout();
   });
