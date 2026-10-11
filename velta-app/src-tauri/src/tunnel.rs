@@ -18,7 +18,7 @@ mod imp {
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_int};
     use std::path::PathBuf;
-    use std::collections::VecDeque;
+    use std::collections::{HashSet, VecDeque};
     use std::sync::{Mutex, OnceLock};
     use tauri::{Emitter, Manager};
 
@@ -50,6 +50,13 @@ mod imp {
     /// Serializes start/stop/install/remove.
     static OP: Mutex<()> = Mutex::new(());
     static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+    /// Accounts being exported or transferred: our proxy is kept off them so
+    /// a backup never carries this device's 127.0.0.1 tunnel port.
+    static DETACHED: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+
+    fn is_detached(id: u32) -> bool {
+        DETACHED.lock().unwrap().as_ref().is_some_and(|s| s.contains(&id))
+    }
     /// Recent shell-side tunnel events for the Velta Diagnostics chat. Kept
     /// here (not only emitted) so lines logged while the WebView sleeps are
     /// still shown once it polls tunnel_status.
@@ -243,6 +250,8 @@ mod imp {
         let ids = accounts.read().await.get_all();
         for id in ids {
             let Some(ctx) = accounts.read().await.get_account(id) else { continue };
+            // An account in the middle of an export gets no tunnel proxy.
+            let desired = if is_detached(id) { None } else { desired.clone() };
             let cur = ctx.get_config(Config::ProxyUrl).await.ok().flatten().unwrap_or_default();
             let enabled = ctx.get_config_bool(Config::ProxyEnabled).await.unwrap_or(false);
             let ours = cur.starts_with(OURS);
@@ -284,6 +293,11 @@ mod imp {
     /// Called once the core is up: restart the tunnel if one is installed.
     pub fn boot(app: &tauri::AppHandle) {
         let _ = APP.set(app.clone());
+        // Always run the proxy keeper, tunnel or not: a profile restored from
+        // a backup (or received from another device) can carry a stale
+        // tunnel proxy pointing at a local port nothing listens on, which
+        // stops all its mail. The keeper clears or updates it.
+        start_applier(app.clone());
         let _g = OP.lock().unwrap();
         let Some(cfg) = load_config(app) else { return };
         if let Err(e) = start(app, cfg) {
@@ -355,6 +369,27 @@ mod imp {
 
     /// The WebView reports a "change" on every mobile bandwidth estimate, so
     /// only a real change of resolvers/operator does anything (a restart).
+    /// Before a backup export or a second-device transfer: drop our proxy
+    /// from the account (and keep it off) so the backup doesn't carry it.
+    pub async fn backup_begin(id: u32) {
+        DETACHED.lock().unwrap().get_or_insert_with(HashSet::new).insert(id);
+        apply_proxy().await;
+        tlog("info", &format!("account {id}: tunnel proxy removed for a backup or transfer"));
+    }
+
+    pub async fn backup_end(id: u32) {
+        if let Some(s) = DETACHED.lock().unwrap().as_mut() {
+            s.remove(&id);
+        }
+        apply_proxy().await;
+    }
+
+    /// After an import or a received transfer: fix the new profile's proxy
+    /// now instead of at the next minute tick.
+    pub async fn reapply() {
+        apply_proxy().await;
+    }
+
     pub fn network_changed(app: &tauri::AppHandle) {
         check_network(app);
     }
@@ -399,6 +434,27 @@ pub fn tunnel_network_changed(app: tauri::AppHandle) {
     imp::network_changed(&app)
 }
 
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn tunnel_backup_begin(account_id: u32) -> Result<(), String> {
+    imp::backup_begin(account_id).await;
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn tunnel_backup_end(account_id: u32) -> Result<(), String> {
+    imp::backup_end(account_id).await;
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn tunnel_reapply() -> Result<(), String> {
+    imp::reapply().await;
+    Ok(())
+}
+
 // Desktop: the tunnel targets mobile allowlists only; report it unavailable.
 #[cfg(not(target_os = "android"))]
 const UNAVAILABLE: &str = "The DNS tunnel is only available in the Android app";
@@ -440,3 +496,23 @@ pub fn tunnel_set_mode(mode: String) -> Result<(), String> {
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub fn tunnel_network_changed() {}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn tunnel_backup_begin(account_id: u32) -> Result<(), String> {
+    let _ = account_id;
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn tunnel_backup_end(account_id: u32) -> Result<(), String> {
+    let _ = account_id;
+    Ok(())
+}
+
+#[cfg(not(target_os = "android"))]
+#[tauri::command]
+pub fn tunnel_reapply() -> Result<(), String> {
+    Ok(())
+}
