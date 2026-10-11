@@ -376,3 +376,11 @@ func TestProbeUsesTheRelayPort(t *testing.T) {
 		}
 	}
 }
+
+func TestWithoutIPv6(t *testing.T) {
+	in := []string{"77.88.8.8:53", "[2a02:6b8::feed:ff]:53", "77.88.8.8:853", "[2a0c:a9c7:8::1]:53"}
+	out, n := withoutIPv6(in)
+	if n != 2 || strings.Join(out, ",") != "77.88.8.8:53,77.88.8.8:853" {
+		t.Fatalf("got %v (%d dropped)", out, n)
+	}
+}

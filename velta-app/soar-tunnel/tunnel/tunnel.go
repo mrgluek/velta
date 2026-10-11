@@ -61,14 +61,15 @@ type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
 
 // Tunnel is a running local proxy.
 type Tunnel struct {
-	cfg    Config
-	ln     net.Listener
-	client *soar.Client
-	log    *eventLog
-	ctx    context.Context
-	cancel context.CancelFunc
-	kick   chan struct{}
-	wg     sync.WaitGroup
+	cfg       Config
+	resolvers []string // the paths handed to soar (IPv6 dropped without a route)
+	ln        net.Listener
+	client    *soar.Client
+	log       *eventLog
+	ctx       context.Context
+	cancel    context.CancelFunc
+	kick      chan struct{}
+	wg        sync.WaitGroup
 
 	// Swappable for tests.
 	dialDirect dialFunc
@@ -120,6 +121,14 @@ func Start(cfg Config) (*Tunnel, error) {
 		return nil, err
 	}
 	key, _ := base64.StdEncoding.DecodeString(cfg.Key)
+	resolvers := cfg.Effective()
+	skipped6 := 0
+	if !hasIPv6Route() {
+		// Without an IPv6 route these paths can only fail, and soar would
+		// add a TCP sibling to each (seen live: 14 dead paths of 43 on an
+		// IPv4-only Wi-Fi). A network change restarts the tunnel and re-checks.
+		resolvers, skipped6 = withoutIPv6(resolvers)
+	}
 	t := &Tunnel{
 		cfg:        cfg,
 		log:        newEventLog(500),
@@ -134,7 +143,7 @@ func Start(cfg Config) (*Tunnel, error) {
 	client, err := soar.NewClient(soar.Config{
 		Zone:          cfg.Zone,
 		ServerKey:     ed25519.PublicKey(key),
-		Resolvers:     cfg.Effective(),
+		Resolvers:     resolvers,
 		TCP:           "auto",
 		SafeQName:     soarSafeQName,
 		MaxPathWindow: soarPathWindow,
@@ -146,6 +155,7 @@ func Start(cfg Config) (*Tunnel, error) {
 		return nil, err
 	}
 	t.client = client
+	t.resolvers = resolvers
 	d := &net.Dialer{Timeout: directDialTimeout}
 	t.dialDirect = d.DialContext
 	t.dialTunnel = client.DialContext
@@ -158,8 +168,11 @@ func Start(cfg Config) (*Tunnel, error) {
 	}
 	t.ln = ln
 	t.setRouteLocked(initialRoute(cfg.Mode), "start")
-	t.log.add("started: mode=%s resolvers=%d (network %d, operator %s +%d) soar=%s", cfg.Mode, len(cfg.Effective()),
+	t.log.add("started: mode=%s resolvers=%d (network %d, operator %s +%d) soar=%s", cfg.Mode, len(resolvers),
 		len(cfg.SystemResolvers), cfg.Operator, len(OperatorResolvers[cfg.Operator]), soarVersion())
+	if skipped6 > 0 {
+		t.log.add("no IPv6 route: skipped %d IPv6 resolvers", skipped6)
+	}
 	t.wg.Add(2)
 	go t.serve()
 	go t.monitor()
@@ -543,6 +556,32 @@ func probeTLS(ctx context.Context, hostport, sni string) error {
 	return c.Close()
 }
 
+// hasIPv6Route reports whether this device can reach the IPv6 internet:
+// connecting a UDP socket only asks the kernel for a route (no packet is
+// sent), and fails at once without one.
+func hasIPv6Route() bool {
+	c, err := net.Dial("udp6", "[2001:4860:4860::8888]:53")
+	if err != nil {
+		return false
+	}
+	c.Close()
+	return true
+}
+
+// withoutIPv6 drops IPv6 resolvers, returning how many it dropped.
+func withoutIPv6(resolvers []string) ([]string, int) {
+	out := make([]string, 0, len(resolvers))
+	for _, r := range resolvers {
+		if host, _, err := net.SplitHostPort(r); err == nil {
+			if ip := net.ParseIP(host); ip != nil && ip.To4() == nil {
+				continue
+			}
+		}
+		out = append(out, r)
+	}
+	return out, len(resolvers) - len(out)
+}
+
 // isDoT reports DNS-over-TLS resolvers (port 853): they speak TCP+TLS only.
 func isDoT(resolver string) bool {
 	_, port, err := net.SplitHostPort(resolver)
@@ -597,7 +636,7 @@ func (t *Tunnel) Status(n int) Status {
 		Route:      t.route.String(),
 		RouteSince: t.routeSince.UTC(),
 		State:      t.state,
-		Resolvers:  len(t.cfg.Effective()),
+		Resolvers:  len(t.resolvers),
 		Network:    t.cfg.SystemResolvers,
 		Operator:   t.cfg.Operator,
 		LastProbe:  t.lastProbe.UTC(),
