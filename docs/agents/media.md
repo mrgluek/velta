@@ -10,8 +10,8 @@ the `[media]` server in lib.rs.
    TCP listener. Used once an `<img>` boot probe has proven this webview
    dispatches custom-protocol requests at all — the probe is an `<img>`,
    so a 200 vouches for the image pipeline exactly.
-2. **Loopback media HTTP server** (`127.0.0.1:20810`, random per-launch
-   token, account-directory-scoped, real ranges) — kept running even on the
+2. **Loopback media HTTP server** (`127.0.0.1`, ephemeral port, random
+   per-launch token, account-directory-scoped, real ranges) — kept running even on the
    happy path: it is the probe-negative fallback AND the one-shot
    per-element fallback, because WebView2's media stack bypasses
    custom-protocol interception even when images through the same scheme
@@ -19,6 +19,16 @@ the `[media]` server in lib.rs.
    can always rely on: the asset protocol there answers the first range
    read but fails mid-file ones, which kills demuxing of moov-at-end MP4s
    (most phone recordings).
+
+   Hardening (do not regress): the port is ephemeral (never a fixed one —
+   two Velta builds on one device raced for 20810 and the loser's media
+   fell to its own CSP), so the CSP allows `http://127.0.0.1:*` in
+   connect/frame/img/media-src. Any local process can reach a loopback
+   port, so the 128-bit token is the access control: it is compared in
+   constant time, stripped from logs (`redactMediaUrl` in media.js — the
+   `media img error src=` / `media base:` lines), and concurrent
+   connections are capped (`MEDIA_MAX_CONNECTIONS`). Pinned by
+   tests/media-server-hardening.test.mjs and `media_token_compare_is_exact`.
 3. **Asset protocol** — last resort.
 4. **Wasm dist only** — if none of the above apply and
    `VELTA_PWA.wasmCore` or `localStorage velta-wasm===1`, an

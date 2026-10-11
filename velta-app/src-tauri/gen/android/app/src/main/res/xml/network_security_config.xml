@@ -5,7 +5,8 @@
      (net::ERR_CLEARTEXT_NOT_PERMITTED). The main app surface is unaffected:
      the SPA never top-level-navigates and the page CSP blocks plain-http
      subresources, so the only cleartext the shell itself speaks stays the
-     loopback media server (127.0.0.1:20810, kept explicit below). -->
+     loopback media server (127.0.0.1 on an ephemeral port, kept explicit
+     below). -->
 <network-security-config>
     <base-config cleartextTrafficPermitted="true">
         <trust-anchors>
