@@ -4185,6 +4185,35 @@ function openIdentityBackup({ restoreOnly = false } = {}) {
   });
 }
 
+// Core `bcc_self` is the multi-device switch (default 0). The core is the
+// source of truth — a localStorage copy would clobber the default and other
+// devices. Cached per account so rebuilding the drawer does not flicker.
+let multiDeviceOn = false;
+let multiDeviceFor = null;
+let multiDeviceGen = 0;
+
+function paintMultiDevice(on) {
+  const box = drawer?.el?.querySelector('[data-toggle="multidevice"]');
+  if (!box?.isConnected) return;
+  box.checked = on;
+  const span = box.closest(".ctx-item")?.querySelector("span");
+  if (span) span.textContent = `Multi-device: ${on ? "on" : "off"}`;
+}
+
+function ensureMultiDevice() {
+  const accountId = core.accountId;
+  const gen = ++multiDeviceGen;
+  Promise.resolve()
+    .then(() => core.getConfig?.("bcc_self"))
+    .then(v => {
+      if (gen !== multiDeviceGen || core.accountId !== accountId) return;
+      multiDeviceFor = accountId;
+      multiDeviceOn = v === "1";
+      paintMultiDevice(multiDeviceOn);
+    })
+    .catch(() => {});
+}
+
 function rebuildDrawer() {
   if (state.accountChanging) return;
   drawer?.el.remove();
@@ -4242,6 +4271,25 @@ function rebuildDrawer() {
       core.setConfig?.("mdns_enabled", on ? "1" : "0").catch(err =>
         errToast("Couldn't save read receipts: " + (err?.message || err)));
     },
+    multiDevice: multiDeviceFor === core.accountId && multiDeviceOn,
+    onDrawerOpen: () => ensureMultiDevice(),
+    onMultiDevice: async (on) => {
+      if (!core.setConfig) return false;
+      const prev = multiDeviceOn;
+      multiDeviceGen++;
+      multiDeviceOn = on;
+      multiDeviceFor = core.accountId;
+      try {
+        await core.setConfig("bcc_self", on ? "1" : "0");
+        return true;
+      } catch (err) {
+        multiDeviceOn = prev;
+        multiDeviceFor = null;
+        errToast("Couldn't save multi-device: " + (err?.message || err));
+        ensureMultiDevice();
+        return false;
+      }
+    },
     onLowBatteryToggle: (on) => {
       // Turning the marker off removes the current 🪫 immediately instead of
       // waiting for the next send to clean it up.
@@ -4288,6 +4336,7 @@ function rebuildDrawer() {
       }
     },
   });
+  ensureMultiDevice();
 }
 
 // Profile editor flow: name + avatar picture.

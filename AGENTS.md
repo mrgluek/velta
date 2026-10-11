@@ -1276,7 +1276,9 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   core's per-account `download_limit` — caps the SECOND-DEVICE history
   sync only; regular messages always auto-download), and a read-receipts
   ctx-item (`velta-mdns` "0"=off mirrored to core `mdns_enabled` — off
-  also stops seen-status sync between own devices),
+  also stops seen-status sync between own devices), a multi-device
+  ctx-item (#117, core `bcc_self` "1"=on, default "0"; the core is the
+  source of truth — no localStorage copy),
   mirrored to the core's per-account `media_quality` config — pushed from
   `rebuildDrawer` on boot/account switch; core `set_config` takes FLAT args
   `[accountId, key, value]`, NOT a nested [key,value] pair) follow it —
