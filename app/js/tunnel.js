@@ -227,6 +227,25 @@ export function bindTunnelNetworkEvents(invoke = shellInvoke()) {
   globalThis.window?.addEventListener?.("online", kick);
 }
 
+function stateHtml(s) {
+  const d = describeTunnel(s);
+  return `<b>${esc(d.headline)}</b>${d.detail ? ` — ${esc(d.detail)}` : ""}`;
+}
+
+/** Path summary for the sheet. On the direct route the tunnel is idle and
+ * soar verifies paths only while carrying traffic, so "0 of N" would read
+ * like a failure. */
+export function pathsSummary(s) {
+  if (!Array.isArray(s?.paths)) return `${s?.resolvers ?? "?"} resolvers`;
+  if (s.route !== "tunnel") return `${s.paths.length} resolver paths ready · tunnel idle, mail goes direct`;
+  const ok = s.paths.filter(p => p.verified).length;
+  return `${ok} of ${s.paths.length} resolver paths working${s.session ? " · session up" : " · connecting…"}`;
+}
+
+function pathsHtml(s) {
+  return `Server: ${esc(s.zone || "?")} · ${esc(pathsSummary(s))}`;
+}
+
 /** Android Private DNS intercepts the tunnel's DNS queries (measured: answers
  * shrink to ~512 bytes and every path runs through one provider). */
 export function privateDnsWarning(s) {
@@ -239,22 +258,31 @@ export function privateDnsWarning(s) {
 export async function openTunnelSettings({ showModal, confirmModal, toast, errToast, onChange, appVersion = "", invoke = shellInvoke() }) {
   if (!invoke) return;
   const s = await refreshTunnelStatus(200, invoke);
-  const d = describeTunnel(s);
   const body = document.createElement("div");
   body.innerHTML = `
-    <p class="p2p-hint"><b>${esc(d.headline)}</b>${d.detail ? ` — ${esc(d.detail)}` : ""}</p>
+    <p class="p2p-hint" data-tunnel-state>${stateHtml(s)}</p>
     ${privateDnsWarning(s)}
     <fieldset class="scale-opts" data-tunnel-modes>
       <legend class="vh">Tunnel mode</legend>
       ${MODES.map(([v, label, hint]) => `<label class="scale-opt" title="${esc(hint)}"><input type="radio" name="tunnel-mode" value="${v}"${s.mode === v ? " checked" : ""}><span>${esc(label)}</span></label>`).join("")}
     </fieldset>
     <div class="bar-opts-hint" data-tunnel-hint>${esc((MODES.find(m => m[0] === s.mode) || MODES[0])[2])}</div>
-    <p class="p2p-hint">Server: ${esc(s.zone || "?")} · ${Array.isArray(s.paths) ? `${s.paths.filter(p => p.verified).length} of ${s.paths.length} resolver paths working` : `${esc(s.resolvers ?? "?")} resolvers`}${s.session ? " · session up" : ""}</p>
+    <p class="p2p-hint" data-tunnel-paths>${pathsHtml(s)}</p>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
       <button type="button" class="btn-text" data-tunnel-share>Share diagnostics…</button>
       <button type="button" class="btn-text" data-tunnel-remove style="color:var(--danger)">Remove the tunnel</button>
     </div>`;
-  const { close } = showModal({ title: "DNS tunnel", body });
+  // Live while open: a mode switch or an allowlist flip shows up within
+  // seconds instead of only after reopening the sheet.
+  let live = null;
+  const { close } = showModal({ title: "DNS tunnel", body, onClose: () => clearInterval(live) });
+  live = setInterval(async () => {
+    const fresh = await refreshTunnelStatus(0, invoke);
+    const st = body.querySelector("[data-tunnel-state]");
+    const ps = body.querySelector("[data-tunnel-paths]");
+    if (st) st.innerHTML = stateHtml(fresh);
+    if (ps) ps.innerHTML = pathsHtml(fresh);
+  }, 2000);
 
   body.querySelectorAll('input[name="tunnel-mode"]').forEach(input =>
     input.addEventListener("change", async () => {

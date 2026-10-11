@@ -249,8 +249,12 @@ func TestRouteSwitchClosesOldConnections(t *testing.T) {
 		t.Fatalf("connect failed: %d", code)
 	}
 	c.SetDeadline(time.Now().Add(5 * time.Second))
+	gen := tt.RouteGen()
 	if err := tt.SetMode(ModeAlways); err != nil {
 		t.Fatal(err)
+	}
+	if tt.RouteGen() != gen+1 {
+		t.Fatalf("a route change must bump the generation the shell watches")
 	}
 	if _, err := c.Read(make([]byte, 1)); err == nil {
 		t.Fatal("direct connection must be closed when the route switches to the tunnel")

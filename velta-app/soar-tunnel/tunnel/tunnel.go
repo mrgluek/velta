@@ -80,6 +80,7 @@ type Tunnel struct {
 	mode       string
 	route      Route
 	routeSince time.Time
+	routeGen   atomic.Int64 // bumped on every route change, for the shell to nudge the core
 	conns      map[*tracked]struct{}
 	relays     map[string]time.Time // relay host -> last seen in a CONNECT
 	relayPorts map[string]string    // relay host -> TLS port to probe (the one the core used)
@@ -190,6 +191,11 @@ func initialRoute(mode string) Route {
 	return RouteDirect
 }
 
+// RouteGen counts route changes. The shell watches it and tells the core to
+// reconnect at once: the core's own retry backoff otherwise leaves mail
+// stalled for a while after the old route's connections were closed.
+func (t *Tunnel) RouteGen() int64 { return t.routeGen.Load() }
+
 // Addr is the SOCKS5 listen address.
 func (t *Tunnel) Addr() string { return t.ln.Addr().String() }
 
@@ -260,6 +266,7 @@ func (t *Tunnel) setRouteLocked(r Route, reason string) {
 	t.route = r
 	t.routeSince = time.Now()
 	if reason != "start" {
+		t.routeGen.Add(1)
 		t.log.add("route %s -> %s (%s)", old, r, reason)
 	}
 	for c := range t.conns {

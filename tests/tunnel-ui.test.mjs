@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning, pathLines, tunnelEventRows, initTunnelDiagnostics } = await import("../app/js/tunnel.js");
+const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning, pathLines, tunnelEventRows, initTunnelDiagnostics, pathsSummary } = await import("../app/js/tunnel.js");
 const { classifyScannedCode } = await import("../app/js/qr-actions.js");
 
 const LINK = "velta://tunnel?v=1&zone=t.example.org&key=AAAA";
@@ -145,4 +145,12 @@ test("diagnostics mirror appends only new events, across polls and UI reloads", 
   const b = initTunnelDiagnostics({ append, invoke, listen: null, intervalMs: 1e9 }); // a UI reload
   await b.ready; b.stop();
   assert.deepEqual(lines, ["info:DNS tunnel: started", "warning:DNS tunnel: direct dial x failed"]);
+});
+
+test("sheet path summary: idle on the direct route, progress on the tunnel", () => {
+  const paths = [{ verified: true }, { verified: false }, { verified: true }];
+  assert.equal(pathsSummary({ route: "direct", paths }), "3 resolver paths ready · tunnel idle, mail goes direct");
+  assert.equal(pathsSummary({ route: "tunnel", paths, session: false }), "2 of 3 resolver paths working · connecting…");
+  assert.equal(pathsSummary({ route: "tunnel", paths, session: true }), "2 of 3 resolver paths working · session up");
+  assert.equal(pathsSummary({ resolvers: 5 }), "5 resolvers");
 });

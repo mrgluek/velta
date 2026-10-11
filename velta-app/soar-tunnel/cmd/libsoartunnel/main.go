@@ -127,6 +127,18 @@ func VeltaTunnelNetworkChanged() {
 	}
 }
 
+// VeltaTunnelRouteGen returns the route-change counter (0 when not running).
+//
+//export VeltaTunnelRouteGen
+func VeltaTunnelRouteGen() C.longlong {
+	mu.Lock()
+	defer mu.Unlock()
+	if cur == nil {
+		return 0
+	}
+	return C.longlong(cur.RouteGen())
+}
+
 // VeltaTunnelFree releases a string returned by this library.
 //
 //export VeltaTunnelFree

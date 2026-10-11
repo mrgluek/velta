@@ -16,7 +16,7 @@ use serde_json::Value;
 mod imp {
     use super::*;
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char, c_int};
+    use std::os::raw::{c_char, c_int, c_longlong};
     use std::path::PathBuf;
     use std::collections::{HashSet, VecDeque};
     use std::sync::{Mutex, OnceLock};
@@ -28,6 +28,7 @@ mod imp {
     type StatusFn = unsafe extern "C" fn(c_int) -> *mut c_char;
     type VoidFn = unsafe extern "C" fn();
     type FreeFn = unsafe extern "C" fn(*mut c_char);
+    type GenFn = unsafe extern "C" fn() -> c_longlong;
 
     struct Lib {
         _lib: libloading::Library,
@@ -39,6 +40,7 @@ mod imp {
         // Loaded to check the ABI; network changes restart the tunnel instead.
         _net_changed: VoidFn,
         free: FreeFn,
+        route_gen: GenFn,
     }
 
     static LIB: OnceLock<Result<Lib, String>> = OnceLock::new();
@@ -102,7 +104,8 @@ mod imp {
             let set_mode = sym!(b"VeltaTunnelSetMode\0", StrFn);
             let _net_changed = sym!(b"VeltaTunnelNetworkChanged\0", VoidFn);
             let free = sym!(b"VeltaTunnelFree\0", FreeFn);
-            Ok(Lib { _lib: l, parse, start, stop, status, set_mode, _net_changed, free })
+            let route_gen = sym!(b"VeltaTunnelRouteGen\0", GenFn);
+            Ok(Lib { _lib: l, parse, start, stop, status, set_mode, _net_changed, free, route_gen })
         })
         .as_ref()
         .map_err(|e| e.clone())
@@ -238,6 +241,26 @@ mod imp {
                     apply_proxy().await;
                     check_network(&app);
                     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                }
+            });
+            // Route watcher: when the router switches direct <-> tunnel (mode
+            // change, allowlist detected, tunnel restart) it closes the old
+            // route's connections; the core would only reconnect after its own
+            // retry delay, so tell it the network changed right away.
+            tauri::async_runtime::spawn(async move {
+                let mut last: Option<i64> = None;
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    let Ok(lib) = lib() else { continue };
+                    let generation = unsafe { (lib.route_gen)() } as i64;
+                    if last.is_some_and(|l| l != generation) {
+                        let accounts = crate::ANDROID_ACCOUNTS.lock().unwrap().clone();
+                        if let Some(accounts) = accounts {
+                            accounts.read().await.maybe_network().await;
+                            tlog("info", "route changed; asked the core to reconnect now");
+                        }
+                    }
+                    last = Some(generation);
                 }
             });
         });
