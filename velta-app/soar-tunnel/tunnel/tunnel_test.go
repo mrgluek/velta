@@ -38,8 +38,11 @@ func TestParseLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Resolvers) != len(DefaultResolvers) || len(cfg.Canaries) != len(DefaultCanaries) {
-		t.Errorf("defaults not applied: %+v", cfg)
+	if len(cfg.Resolvers) != 0 || cfg.Canaries != nil {
+		t.Errorf("a link without r/c must not freeze today's defaults: %+v", cfg)
+	}
+	if n, _ := cfg.Normalize(); len(n.Effective()) != len(DefaultResolvers) || len(n.Canaries) != len(DefaultCanaries) {
+		t.Errorf("defaults not applied at start: %+v", n)
 	}
 
 	for _, bad := range []string{
@@ -290,5 +293,42 @@ func TestAnyCanaryMeansBlocked(t *testing.T) {
 	tt.probeTLS = func(context.Context, string, string) error { return errors.New("refused") }
 	if res := tt.probe(); res.CanaryOK {
 		t.Fatalf("no canary answering must read as offline: %+v", res)
+	}
+}
+
+func TestEffectiveOrder(t *testing.T) {
+	cfg, err := Config{
+		Zone: "t.example.org", Key: testKey,
+		Resolvers:       []string{"77.88.8.8:53", "10.0.0.1:53"},
+		SystemResolvers: []string{"10.0.0.1:53", "fe80::1%wlan0", "garbage", "2001:db8::53"},
+		Operator:        "25001",
+	}.Normalize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	eff := cfg.Effective()
+	if eff[0] != "10.0.0.1:53" || eff[1] != "[2001:db8::53]:53" {
+		t.Fatalf("network resolvers must come first: %v", eff)
+	}
+	if eff[2] != OperatorResolvers["25001"][0] {
+		t.Fatalf("operator resolvers must follow: %v", eff)
+	}
+	// link extras (77.88.8.8 is also a default: listed once), then defaults
+	if eff[2+len(OperatorResolvers["25001"])] != "77.88.8.8:53" {
+		t.Fatalf("link resolvers must follow the operator's: %v", eff)
+	}
+	seen := map[string]bool{}
+	for _, r := range eff {
+		if seen[r] {
+			t.Fatalf("duplicate %s in %v", r, eff)
+		}
+		seen[r] = true
+	}
+	if len(eff) != 2+len(OperatorResolvers["25001"])+len(DefaultResolvers) {
+		t.Fatalf("network + operator + defaults (link entries overlap them): %d %v", len(eff), eff)
+	}
+	other, _ := Config{Zone: "t.example.org", Key: testKey, Operator: "99999"}.Normalize()
+	if len(other.Effective()) != len(DefaultResolvers) {
+		t.Fatalf("unknown operator adds nothing")
 	}
 }

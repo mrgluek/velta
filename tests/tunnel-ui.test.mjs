@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus } = await import("../app/js/tunnel.js");
+const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning } = await import("../app/js/tunnel.js");
 const { classifyScannedCode } = await import("../app/js/qr-actions.js");
 
 const LINK = "velta://tunnel?v=1&zone=t.example.org&key=AAAA";
@@ -93,4 +93,13 @@ test("a rejected link never reaches the confirmation", async () => {
   assert.equal(ok, false);
   assert.equal(asked, false);
   assert.match(err, /32 bytes/);
+});
+
+test("Private DNS warning and network lines", () => {
+  assert.equal(privateDnsWarning({ network: { private_dns: false } }), "");
+  assert.match(privateDnsWarning({ network: { private_dns: true, private_dns_name: "x.dns.example" } }), /Private DNS is on \(x\.dns\.example\)/);
+  const text = tunnelReport({ network: { transport: "cellular", sim_operator: "25001", operator_name: "MTS RUS", private_dns: false },
+    network_resolvers: ["10.0.0.1:53"], events: [] });
+  assert.match(text, /network: cellular {2}operator: 25001 MTS RUS {2}private dns: off/);
+  assert.match(text, /network resolvers: 10\.0\.0\.1:53/);
 });

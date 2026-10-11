@@ -48,6 +48,8 @@ var DefaultResolvers = []string{
 	"77.88.8.88:53", "77.88.8.2:53", "[2a02:6b8::feed:bad]:53", "[2a02:6b8:0:1::feed:bad]:53",
 	"77.88.8.7:53", "77.88.8.3:53", "[2a02:6b8::feed:a11]:53", "[2a02:6b8:0:1::feed:a11]:53",
 	"77.88.8.8:853", "77.88.8.1:853", "77.88.8.88:853", "77.88.8.7:853",
+	// TransTeleCom "Public Servers": open, answered all 28 RU probes.
+	"217.150.34.129:53",
 	// SafeDNS, Google, Quad9.
 	"195.46.39.39:53", "195.46.39.40:53",
 	"8.8.8.8:53", "8.8.4.4:53",
@@ -67,13 +69,19 @@ type Config struct {
 	Key       string   `json:"key"` // server Ed25519 public key, standard base64
 	Resolvers []string `json:"resolvers"`
 	Canaries  []string `json:"canaries,omitempty"`
-	Mode      string   `json:"mode,omitempty"`
-	Listen    string   `json:"listen,omitempty"` // default 127.0.0.1:0
-	User      string   `json:"user,omitempty"`   // SOCKS5 credentials; empty = no auth
-	Pass      string   `json:"pass,omitempty"`
+	// SystemResolvers are the DNS servers the phone's current network handed
+	// out (the operator's on mobile data); Operator is the SIM's MCC+MNC.
+	// Both come from the app at start, never from a link.
+	SystemResolvers []string `json:"system_resolvers,omitempty"`
+	Operator        string   `json:"operator,omitempty"`
+	Mode            string   `json:"mode,omitempty"`
+	Listen          string   `json:"listen,omitempty"` // default 127.0.0.1:0
+	User            string   `json:"user,omitempty"`   // SOCKS5 credentials; empty = no auth
+	Pass            string   `json:"pass,omitempty"`
 }
 
 // ParseLink parses velta://tunnel?v=1&zone=<zone>&key=<base64>[&r=<ip:port,…>][&c=<host:port,…>].
+// r adds resolvers to the defaults; c replaces the default canaries.
 // The key may be standard or URL-safe base64, padded or not.
 func ParseLink(link string) (Config, error) {
 	u, err := url.Parse(strings.TrimSpace(link))
@@ -94,7 +102,16 @@ func ParseLink(link string) (Config, error) {
 	if c := q.Get("c"); c != "" {
 		cfg.Canaries = strings.Split(c, ",")
 	}
-	return cfg.Normalize()
+	n, err := cfg.Normalize()
+	if err != nil {
+		return Config{}, err
+	}
+	// Keep only what the link set: default canaries are filled at start, so
+	// an app update with better ones reaches tunnels installed earlier.
+	if len(cfg.Canaries) == 0 {
+		n.Canaries = nil
+	}
+	return n, nil
 }
 
 // Normalize validates the config and fills defaults.
@@ -128,10 +145,20 @@ func (c Config) Normalize() (Config, error) {
 	if len(rs) > maxResolvers {
 		return Config{}, fmt.Errorf("too many resolvers (%d, max %d)", len(rs), maxResolvers)
 	}
-	if len(rs) == 0 {
-		rs = append([]string(nil), DefaultResolvers...)
-	}
+	// Link resolvers add to DefaultResolvers (see Effective), so better
+	// defaults in an app update reach every installed tunnel.
 	c.Resolvers = rs
+
+	// The network's own resolvers first: on allowlist-only mobile internet
+	// the operator-assigned one is the resolver that keeps answering. Bad
+	// entries from the device are dropped, not fatal.
+	var sys []string
+	for _, r := range c.SystemResolvers {
+		if norm, err := checkResolver(strings.TrimSpace(r)); err == nil {
+			sys = append(sys, norm)
+		}
+	}
+	c.SystemResolvers = sys
 
 	var cs []string
 	for _, h := range c.Canaries {
@@ -162,6 +189,27 @@ func (c Config) Normalize() (Config, error) {
 		c.Listen = "127.0.0.1:0"
 	}
 	return c, nil
+}
+
+// Effective is the resolver list the tunnel uses: the network's resolvers,
+// then the SIM operator's known resolvers, then the link's extra resolvers,
+// then DefaultResolvers, without duplicates and capped at maxResolvers.
+func (c Config) Effective() []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(list []string) {
+		for _, r := range list {
+			if !seen[r] && len(out) < maxResolvers {
+				seen[r] = true
+				out = append(out, r)
+			}
+		}
+	}
+	add(c.SystemResolvers)
+	add(OperatorResolvers[c.Operator])
+	add(c.Resolvers)
+	add(DefaultResolvers)
+	return out
 }
 
 func checkZone(z string) error {

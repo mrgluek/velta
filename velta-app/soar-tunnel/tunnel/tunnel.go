@@ -128,7 +128,7 @@ func Start(cfg Config) (*Tunnel, error) {
 	client, err := soar.NewClient(soar.Config{
 		Zone:          cfg.Zone,
 		ServerKey:     ed25519.PublicKey(key),
-		Resolvers:     cfg.Resolvers,
+		Resolvers:     cfg.Effective(),
 		TCP:           "auto",
 		SafeQName:     soarSafeQName,
 		MaxPathWindow: soarPathWindow,
@@ -151,7 +151,8 @@ func Start(cfg Config) (*Tunnel, error) {
 	}
 	t.ln = ln
 	t.setRouteLocked(initialRoute(cfg.Mode), "start")
-	t.log.add("started: mode=%s resolvers=%d soar=%s", cfg.Mode, len(cfg.Resolvers), soarVersion())
+	t.log.add("started: mode=%s resolvers=%d (network %d, operator %s +%d) soar=%s", cfg.Mode, len(cfg.Effective()),
+		len(cfg.SystemResolvers), cfg.Operator, len(OperatorResolvers[cfg.Operator]), soarVersion())
 	t.wg.Add(2)
 	go t.serve()
 	go t.monitor()
@@ -528,6 +529,8 @@ type Status struct {
 	RouteSince time.Time             `json:"route_since"`
 	State      string                `json:"state"`
 	Resolvers  int                   `json:"resolvers"`
+	Network    []string              `json:"network_resolvers"`
+	Operator   string                `json:"operator"`
 	Relays     []string              `json:"relays"`
 	LastProbe  time.Time             `json:"last_probe"`
 	LastResult probeResult           `json:"last_result"`
@@ -547,7 +550,9 @@ func (t *Tunnel) Status(n int) Status {
 		Route:      t.route.String(),
 		RouteSince: t.routeSince.UTC(),
 		State:      t.state,
-		Resolvers:  len(t.cfg.Resolvers),
+		Resolvers:  len(t.cfg.Effective()),
+		Network:    t.cfg.SystemResolvers,
+		Operator:   t.cfg.Operator,
 		LastProbe:  t.lastProbe.UTC(),
 		LastResult: t.lastResult,
 		Active:     map[string]int{"direct": 0, "tunnel": 0},

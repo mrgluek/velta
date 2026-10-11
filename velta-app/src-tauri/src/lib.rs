@@ -1949,6 +1949,8 @@ static APP_NOTIFICATIONS_CLASS: Mutex<Option<jni::objects::GlobalRef>> = Mutex::
 // classloader reason: the commands run on a Rust worker thread.
 #[cfg(target_os = "android")]
 static APP_BATTERY_CLASS: Mutex<Option<jni::objects::GlobalRef>> = Mutex::new(None);
+#[cfg(target_os = "android")]
+static APP_NETINFO_CLASS: Mutex<Option<jni::objects::GlobalRef>> = Mutex::new(None);
 
 // org.velta.UpdateInstall — #60: hands a downloaded APK to the system
 // package installer. Cached for the same classloader reason as above.
@@ -2027,6 +2029,16 @@ pub extern "system" fn Java_org_velta_MainActivity_setApplicationContext(
             Err(e) => log(&format!("setApplicationContext: Battery global ref failed: {e}")),
         },
         Err(e) => log(&format!("setApplicationContext: Battery find_class failed: {e}")),
+    }
+    // DNS tunnel (tunnel.rs): operator-assigned resolvers + SIM operator.
+    match env.find_class("org/velta/NetInfo") {
+        Ok(class) => match env.new_global_ref(&class) {
+            Ok(g) => {
+                *APP_NETINFO_CLASS.lock().unwrap() = Some(g);
+            }
+            Err(e) => log(&format!("setApplicationContext: NetInfo global ref failed: {e}")),
+        },
+        Err(e) => log(&format!("setApplicationContext: NetInfo find_class failed: {e}")),
     }
     match env.find_class("org/velta/UpdateInstall") {
         Ok(class) => match env.new_global_ref(&class) {

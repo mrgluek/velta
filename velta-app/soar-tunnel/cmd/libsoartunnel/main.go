@@ -41,7 +41,13 @@ func VeltaTunnelParseLink(link *C.char) *C.char {
 		return fail(err)
 	}
 	cfg.User, cfg.Pass = tunnel.RandomCredentials()
-	return result(cfg)
+	n, _ := cfg.Normalize()
+	return result(struct {
+		tunnel.Config
+		// For the confirmation text: the list the tunnel will use before
+		// the network's and operator's resolvers are added.
+		EffectiveResolvers int `json:"effective_resolvers"`
+	}{cfg, len(n.Effective())})
 }
 
 // VeltaTunnelStart (re)starts the proxy from a config JSON and returns

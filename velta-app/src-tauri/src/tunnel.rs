@@ -42,6 +42,8 @@ mod imp {
     static LIB: OnceLock<Result<Lib, String>> = OnceLock::new();
     /// The proxy URL the core should use, or None when the tunnel is not installed.
     static PROXY_URL: Mutex<Option<String>> = Mutex::new(None);
+    /// Network resolvers + operator the running tunnel was started with.
+    static LAST_NET: Mutex<Option<(Value, String)>> = Mutex::new(None);
     static APPLIER: OnceLock<()> = OnceLock::new();
     /// Serializes start/stop/install/remove.
     static OP: Mutex<()> = Mutex::new(());
@@ -93,6 +95,28 @@ mod imp {
         take(lib, unsafe { f(lib)(c.as_ptr()) })
     }
 
+    /// NetInfo.kt snapshot: {"dns": ["10.0.0.1:53", …], "sim_operator": "25001",
+    /// "transport": "cellular", "private_dns": false, …}.
+    fn network_info() -> Option<Value> {
+        let context = crate::APP_CONTEXT.lock().unwrap().as_ref().map(|r| r.as_obj().clone())?;
+        let vm_guard = crate::APP_JAVA_VM.lock().unwrap();
+        let mut env = vm_guard.as_ref()?.attach_current_thread().ok()?;
+        let class_guard = crate::APP_NETINFO_CLASS.lock().unwrap();
+        let class_ref = class_guard.as_ref()?;
+        let out = env
+            .call_static_method(class_ref, "snapshot", "(Landroid/content/Context;)Ljava/lang/String;", &[(&context).into()])
+            .ok()?;
+        let jstr = jni::objects::JString::from(out.l().ok()?);
+        let s = env.get_string(&jstr).ok()?.to_string_lossy().into_owned();
+        serde_json::from_str(&s).ok()
+    }
+
+    /// What decides the path set: the network's resolvers and the SIM operator.
+    fn network_key(info: &Value) -> (Value, String) {
+        let op = info["sim_operator"].as_str().filter(|s| !s.is_empty()).or(info["network_operator"].as_str()).unwrap_or("");
+        (info["dns"].clone(), op.to_string())
+    }
+
     fn config_path(app: &tauri::AppHandle) -> Option<PathBuf> {
         Some(app.path().app_local_data_dir().ok()?.join("tunnel.json"))
     }
@@ -110,35 +134,73 @@ mod imp {
         std::fs::write(&path, serde_json::to_string(cfg).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
     }
 
-    /// Starts the library from a stored config. Reuses the saved port so the
-    /// accounts' proxy_url stays valid across restarts; falls back to any port.
+    /// Starts (or restarts) the library from a stored config, adding the
+    /// current network's resolvers and operator (never persisted). Reuses
+    /// the saved port so the accounts' proxy_url stays valid across restarts.
     fn start(app: &tauri::AppHandle, mut cfg: Value) -> Result<(), String> {
-        let res = call(|l| l.start, &cfg.to_string()).or_else(|e| {
-            if cfg["listen"].as_str() == Some("127.0.0.1:0") {
+        let mut run = cfg.clone();
+        let net = network_info();
+        if let Some(info) = &net {
+            let (dns, op) = network_key(info);
+            run["system_resolvers"] = dns;
+            run["operator"] = Value::from(op);
+        }
+        let res = call(|l| l.start, &run.to_string()).or_else(|e| {
+            if run["listen"].as_str() == Some("127.0.0.1:0") {
                 return Err(e);
             }
             crate::log(&format!("dns tunnel: saved port unavailable ({e}); picking a new one"));
-            cfg["listen"] = Value::from("127.0.0.1:0");
-            call(|l| l.start, &cfg.to_string())
+            run["listen"] = Value::from("127.0.0.1:0");
+            call(|l| l.start, &run.to_string())
         })?;
         let addr = res["addr"].as_str().ok_or("no listen address")?.to_string();
         cfg["listen"] = Value::from(addr.clone());
         save_config(app, &cfg)?;
+        *LAST_NET.lock().unwrap() = net.as_ref().map(network_key);
         let user = cfg["user"].as_str().unwrap_or_default();
         let pass = cfg["pass"].as_str().unwrap_or_default();
         *PROXY_URL.lock().unwrap() = Some(format!("socks5://{user}:{pass}@{addr}"));
-        crate::log(&format!("dns tunnel: listening on {addr}, mode {}", cfg["mode"].as_str().unwrap_or("auto")));
-        start_applier();
+        crate::log(&format!(
+            "dns tunnel: listening on {addr}, mode {}, network resolvers {}, operator {}",
+            cfg["mode"].as_str().unwrap_or("auto"),
+            run["system_resolvers"].as_array().map_or(0, |a| a.len()),
+            run["operator"].as_str().unwrap_or("?"),
+        ));
+        start_applier(app.clone());
         Ok(())
     }
 
-    /// Keeps every profile's proxy_url in line with the tunnel: on install,
-    /// on removal, and every minute so profiles added later pick it up.
-    fn start_applier() {
+    /// Restarts the tunnel when the network's resolvers or the operator
+    /// changed (Wi-Fi <-> mobile, SIM swap): soar's path set is fixed per
+    /// client. Otherwise only asks the router for a re-check.
+    fn check_network(app: &tauri::AppHandle) {
+        let _g = OP.lock().unwrap();
+        if PROXY_URL.lock().unwrap().is_none() {
+            return;
+        }
+        let Some(info) = network_info() else { return };
+        let key = network_key(&info);
+        let changed = LAST_NET.lock().unwrap().as_ref() != Some(&key);
+        if !changed {
+            return;
+        }
+        crate::log("dns tunnel: network resolvers changed; restarting the tunnel");
+        if let Some(cfg) = load_config(app) {
+            if let Err(e) = start(app, cfg) {
+                crate::log(&format!("dns tunnel: restart failed: {e}"));
+            }
+        }
+    }
+
+    /// Keeps every profile's proxy_url in line with the tunnel (on install,
+    /// on removal, and every minute so profiles added later pick it up) and
+    /// follows network changes even while the WebView sleeps.
+    fn start_applier(app: tauri::AppHandle) {
         APPLIER.get_or_init(|| {
-            tauri::async_runtime::spawn(async {
+            tauri::async_runtime::spawn(async move {
                 loop {
                     apply_proxy().await;
+                    check_network(&app);
                     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
                 }
             });
@@ -193,14 +255,17 @@ mod imp {
         let cfg = call(|l| l.parse, link)?;
         Ok(serde_json::json!({
             "zone": cfg["zone"],
-            "resolvers": cfg["resolvers"].as_array().map_or(0, |a| a.len()),
+            "resolvers": cfg["effective_resolvers"],
             "canaries": cfg["canaries"],
         }))
     }
 
     pub fn install(app: &tauri::AppHandle, link: &str) -> Result<(), String> {
         let _g = OP.lock().unwrap();
-        let cfg = call(|l| l.parse, link)?;
+        let mut cfg = call(|l| l.parse, link)?;
+        if let Some(o) = cfg.as_object_mut() {
+            o.remove("effective_resolvers");
+        }
         start(app, cfg)?;
         tauri::async_runtime::spawn(apply_proxy());
         Ok(())
@@ -212,6 +277,7 @@ mod imp {
             unsafe { (lib.stop)() };
         }
         *PROXY_URL.lock().unwrap() = None;
+        *LAST_NET.lock().unwrap() = None;
         if let Some(path) = config_path(app) {
             let _ = std::fs::remove_file(path);
         }
@@ -230,6 +296,9 @@ mod imp {
         if v.get("available").is_none() {
             v["available"] = Value::from(true);
         }
+        if let Some(net) = network_info() {
+            v["network"] = net;
+        }
         v
     }
 
@@ -243,7 +312,8 @@ mod imp {
         Ok(())
     }
 
-    pub fn network_changed() {
+    pub fn network_changed(app: &tauri::AppHandle) {
+        check_network(app);
         if let Ok(lib) = lib() {
             unsafe { (lib.net_changed)() };
         }
@@ -285,8 +355,8 @@ pub fn tunnel_set_mode(app: tauri::AppHandle, mode: String) -> Result<(), String
 
 #[cfg(target_os = "android")]
 #[tauri::command]
-pub fn tunnel_network_changed() {
-    imp::network_changed()
+pub fn tunnel_network_changed(app: tauri::AppHandle) {
+    imp::network_changed(&app)
 }
 
 // Desktop: the tunnel targets mobile allowlists only; report it unavailable.
