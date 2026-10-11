@@ -51,7 +51,8 @@ the router decides per connection:
 - **auto** (default): DIRECT while a relay answers; a failed direct dial
   falls back to the tunnel for that connection. The monitor probes the
   relays the core used and the canaries over real TLS (a TCP connect proves
-  nothing behind fake-IP VPNs or SYN-passing allowlists). All relays failing
+  nothing behind fake-IP VPNs or SYN-passing allowlists), on the port the core
+used when it starts with TLS (993, 465, 443) and on 443 for STARTTLS ports. All relays failing
   while any canary answers twice in a row = blocked → TUNNEL; a relay
   answering directly three times = back to DIRECT; nothing answering =
   offline, no change. A route switch closes the old route's connections so
@@ -65,6 +66,21 @@ IO scheduler on every flip and can't fall back per connection.
 (prefix `socks5://velta-tunnel:`); a proxy the user set wins. A 60 s loop
 re-applies it so profiles added later pick it up. Removing the tunnel clears
 only our value.
+
+## Known limits
+
+- The core puts a 60 s read/write timeout on every socket, proxied ones
+  included (`core/src/net.rs` `TIMEOUT`). A tunnel path that stalls longer
+  kills that IMAP FETCH or SMTP DATA; the core retries on a new connection.
+- Encrypted attachments over 140 KB travel as a separate post-message
+  (`PRE_MSG_ATTACHMENT_SIZE_THRESHOLD`, core/src/download.rs). If its fetch
+  fails, the chat shows the "Downloading… / Tap to download" card, not an
+  image. "Couldn't load image" is different: the core has the file
+  (`downloadState Done` + `filePath`) and the WebView failed to load it — a
+  media-path problem, not a transport one (chat-view.js renders `<img>` only
+  for downloaded files).
+- A route switch closes the old route's connections on purpose; the monitor's
+  hysteresis (2 blocked / 3 recovered probes) keeps that rare.
 
 ## soar fork (path stats)
 

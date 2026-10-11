@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func newTestTunnel(t *testing.T, mode string, direct, tun dialFunc) *Tunnel {
 		t.Fatal(err)
 	}
 	tt := &Tunnel{cfg: cfg, log: newEventLog(100), kick: make(chan struct{}, 1), mode: mode,
-		conns: map[*tracked]struct{}{}, relays: map[string]time.Time{}, state: "unknown",
+		conns: map[*tracked]struct{}{}, relays: map[string]time.Time{}, relayPorts: map[string]string{}, state: "unknown",
 		dialDirect: direct, dialTunnel: tun,
 		probeTLS: func(context.Context, string, string) error { return errors.New("no probes in tests") }}
 	tt.ctx, tt.cancel = context.WithCancel(context.Background())
@@ -353,5 +354,25 @@ func TestBytesCountedWhileOpen(t *testing.T) {
 	st := tt.Status(0).Stats["tunnel"]
 	if st.Up != 5 || st.Down != 5 || st.Conns != 1 {
 		t.Fatalf("live counters on an open connection: %+v", st)
+	}
+}
+
+func TestProbeUsesTheRelayPort(t *testing.T) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAuto, echoDialer("D:", &n), echoDialer("T:", &n))
+	for _, target := range []string{"imap.example.org:993", "smtp.example.org:587"} {
+		c, _ := socksConnect(t, tt.Addr(), "u", "p", target)
+		c.Close()
+	}
+	var probed sync.Map
+	tt.probeTLS = func(_ context.Context, hostport, _ string) error {
+		probed.Store(hostport, true)
+		return nil
+	}
+	tt.probe()
+	for _, want := range []string{"imap.example.org:993", "smtp.example.org:443"} {
+		if _, ok := probed.Load(want); !ok {
+			t.Errorf("expected a TLS probe of %s", want)
+		}
 	}
 }

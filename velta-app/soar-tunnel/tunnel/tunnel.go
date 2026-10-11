@@ -81,6 +81,7 @@ type Tunnel struct {
 	routeSince time.Time
 	conns      map[*tracked]struct{}
 	relays     map[string]time.Time // relay host -> last seen in a CONNECT
+	relayPorts map[string]string    // relay host -> TLS port to probe (the one the core used)
 	failStreak int
 	okStreak   int
 	state      string
@@ -120,13 +121,14 @@ func Start(cfg Config) (*Tunnel, error) {
 	}
 	key, _ := base64.StdEncoding.DecodeString(cfg.Key)
 	t := &Tunnel{
-		cfg:    cfg,
-		log:    newEventLog(500),
-		kick:   make(chan struct{}, 1),
-		mode:   cfg.Mode,
-		conns:  map[*tracked]struct{}{},
-		relays: map[string]time.Time{},
-		state:  "unknown",
+		cfg:        cfg,
+		log:        newEventLog(500),
+		kick:       make(chan struct{}, 1),
+		mode:       cfg.Mode,
+		conns:      map[*tracked]struct{}{},
+		relays:     map[string]time.Time{},
+		relayPorts: map[string]string{},
+		state:      "unknown",
 	}
 	t.ctx, t.cancel = context.WithCancel(context.Background())
 	client, err := soar.NewClient(soar.Config{
@@ -279,6 +281,7 @@ func (t *Tunnel) handle(c net.Conn) {
 	if host, _, err := net.SplitHostPort(addr); err == nil && net.ParseIP(host) == nil {
 		t.mu.Lock()
 		t.relays[host] = time.Now()
+		t.relayPorts[host] = probePort(addr)
 		t.mu.Unlock()
 	}
 
@@ -441,7 +444,13 @@ func (t *Tunnel) probe() probeResult {
 			defer wg.Done()
 			ctx, cancel := context.WithTimeout(t.ctx, probeTimeout)
 			defer cancel()
-			if t.probeTLS(ctx, net.JoinHostPort(h, "443"), h) == nil {
+			t.mu.Lock()
+			port := t.relayPorts[h]
+			t.mu.Unlock()
+			if port == "" {
+				port = "443"
+			}
+			if t.probeTLS(ctx, net.JoinHostPort(h, port), h) == nil {
 				mu.Lock()
 				res.RelayOK++
 				mu.Unlock()
@@ -506,6 +515,20 @@ func decide(route Route, res probeResult, failStreak, okStreak int) (Route, int,
 	default:
 		return route, failStreak, 0, "offline"
 	}
+}
+
+// probePort is the port to TLS-probe a relay on: the one the core connects to
+// when it starts with TLS (IMAPS 993, SMTPS 465, ALPN 443). Plain-start ports
+// (143/587 use STARTTLS) can't be TLS-probed directly; chatmail relays serve
+// TLS on 443 for those.
+func probePort(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		switch port {
+		case "993", "465", "443":
+			return port
+		}
+	}
+	return "443"
 }
 
 func probeTLS(ctx context.Context, hostport, sni string) error {
