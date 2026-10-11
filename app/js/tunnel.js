@@ -157,6 +157,61 @@ export async function acceptTunnelLink(link, { confirmModal, toast, errToast, on
   return true;
 }
 
+/** Router (Go) and shell (Rust) events as one time-ordered list of
+ * {ms, level, msg}. Router events carry RFC 3339 times; shell events carry
+ * epoch ms and their own level. */
+export function tunnelEventRows(status) {
+  const rows = [];
+  for (const e of status?.events || []) {
+    const ms = Date.parse(e.t);
+    if (Number.isFinite(ms)) rows.push({ ms, level: routerEventLevel(e.msg), msg: e.msg });
+  }
+  for (const e of status?.shell_events || []) {
+    if (Number.isFinite(e.t_ms)) rows.push({ ms: e.t_ms, level: e.level || "info", msg: e.msg });
+  }
+  return rows.sort((a, b) => a.ms - b.ms);
+}
+
+export function routerEventLevel(msg) {
+  return /failed|error|refused|unreachable|-> blocked|-> offline|socks:/i.test(msg || "") ? "warning" : "info";
+}
+
+const DIAG_SEEN_KEY = "velta-tunnel-diag-seen";
+
+/**
+ * Mirrors tunnel events into the Velta Diagnostics chat: polls the status
+ * (every 20 s, on resume, and when the shell signals a new line) and appends
+ * only events newer than the last one shown. The high-water mark survives UI
+ * reloads, so a reconnect does not repeat old lines.
+ */
+export function initTunnelDiagnostics({ append, invoke = shellInvoke(), listen = globalThis.window?.__TAURI__?.event?.listen, intervalMs = 20000 }) {
+  if (!invoke) return null;
+  let seen = 0;
+  try { seen = Number(globalThis.localStorage?.getItem(DIAG_SEEN_KEY)) || 0; } catch {}
+  let busy = false;
+  const poll = async () => {
+    if (busy) return;
+    busy = true;
+    try {
+      const s = await refreshTunnelStatus(200, invoke);
+      if (!s.installed && !(s.shell_events || []).length) return;
+      for (const row of tunnelEventRows(s)) {
+        if (row.ms <= seen) continue;
+        append(row.level, `DNS tunnel: ${row.msg}`);
+        seen = row.ms;
+      }
+      try { globalThis.localStorage?.setItem(DIAG_SEEN_KEY, String(seen)); } catch {}
+    } finally {
+      busy = false;
+    }
+  };
+  listen?.("velta-tunnel-log", () => { poll(); });
+  const timer = setInterval(poll, intervalMs);
+  globalThis.document?.addEventListener?.("visibilitychange", () => { if (!globalThis.document.hidden) poll(); });
+  const ready = poll();
+  return { poll, ready, stop: () => clearInterval(timer) };
+}
+
 /** Re-check routing after a network switch (Wi-Fi <-> mobile, airplane mode). */
 export function bindTunnelNetworkEvents(invoke = shellInvoke()) {
   if (!invoke) return;

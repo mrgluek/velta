@@ -18,8 +18,9 @@ mod imp {
     use std::ffi::{CStr, CString};
     use std::os::raw::{c_char, c_int};
     use std::path::PathBuf;
+    use std::collections::VecDeque;
     use std::sync::{Mutex, OnceLock};
-    use tauri::Manager;
+    use tauri::{Emitter, Manager};
 
     use deltachat::config::Config;
 
@@ -48,6 +49,30 @@ mod imp {
     static APPLIER: OnceLock<()> = OnceLock::new();
     /// Serializes start/stop/install/remove.
     static OP: Mutex<()> = Mutex::new(());
+    static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+    /// Recent shell-side tunnel events for the Velta Diagnostics chat. Kept
+    /// here (not only emitted) so lines logged while the WebView sleeps are
+    /// still shown once it polls tunnel_status.
+    static SHELL_EVENTS: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
+
+    /// Logs a tunnel event to the shell log and the diagnostics ring, and
+    /// wakes the page so it shows up in Velta Diagnostics at once.
+    fn tlog(level: &str, msg: &str) {
+        crate::log(&format!("dns tunnel: {msg}"));
+        let ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64);
+        {
+            let mut ring = SHELL_EVENTS.lock().unwrap();
+            ring.push_back(serde_json::json!({"t_ms": ms, "level": level, "msg": msg}));
+            while ring.len() > 100 {
+                ring.pop_front();
+            }
+        }
+        if let Some(app) = APP.get() {
+            let _ = app.emit("velta-tunnel-log", ());
+        }
+    }
 
     /// Every proxy URL this module writes starts with this; anything else in
     /// `proxy_url` is the user's own proxy and is left alone.
@@ -141,6 +166,7 @@ mod imp {
     /// current network's resolvers and operator (never persisted). Reuses
     /// the saved port so the accounts' proxy_url stays valid across restarts.
     fn start(app: &tauri::AppHandle, mut cfg: Value) -> Result<(), String> {
+        let _ = APP.set(app.clone());
         let mut run = cfg.clone();
         let net = network_info();
         if let Some(info) = &net {
@@ -152,7 +178,7 @@ mod imp {
             if run["listen"].as_str() == Some("127.0.0.1:0") {
                 return Err(e);
             }
-            crate::log(&format!("dns tunnel: saved port unavailable ({e}); picking a new one"));
+            tlog("warning", &format!("saved port unavailable ({e}); picking a new one"));
             run["listen"] = Value::from("127.0.0.1:0");
             call(|l| l.start, &run.to_string())
         })?;
@@ -163,8 +189,8 @@ mod imp {
         let user = cfg["user"].as_str().unwrap_or_default();
         let pass = cfg["pass"].as_str().unwrap_or_default();
         *PROXY_URL.lock().unwrap() = Some(format!("socks5://{user}:{pass}@{addr}"));
-        crate::log(&format!(
-            "dns tunnel: listening on {addr}, mode {}, network resolvers {}, operator {}",
+        tlog("info", &format!(
+            "started on {addr}, mode {}, network resolvers {}, operator {}",
             cfg["mode"].as_str().unwrap_or("auto"),
             run["system_resolvers"].as_array().map_or(0, |a| a.len()),
             run["operator"].as_str().unwrap_or("?"),
@@ -187,10 +213,10 @@ mod imp {
         if !changed {
             return;
         }
-        crate::log("dns tunnel: network resolvers changed; restarting the tunnel");
+        tlog("info", "network resolvers or operator changed; restarting the tunnel");
         if let Some(cfg) = load_config(app) {
             if let Err(e) = start(app, cfg) {
-                crate::log(&format!("dns tunnel: restart failed: {e}"));
+                tlog("error", &format!("restart failed: {e}"));
             }
         }
     }
@@ -244,12 +270,12 @@ mod imp {
                 None => Ok(()),
             };
             if let Err(e) = result {
-                crate::log(&format!("dns tunnel: proxy update for account {id} failed: {e}"));
+                tlog("warning", &format!("proxy update for account {id} failed: {e}"));
             } else if changed {
                 // set_config only affects NEW connections: without a restart
                 // the open IMAP/SMTP sessions keep bypassing (or keep using)
                 // the proxy until they drop on their own.
-                crate::log(&format!("dns tunnel: proxy {} for account {id}; restarting its IO", if desired.is_some() { "set" } else { "cleared" }));
+                tlog("info", &format!("proxy {} for account {id}; restarting its IO", if desired.is_some() { "set" } else { "cleared" }));
                 ctx.restart_io_if_running().await;
             }
         }
@@ -257,10 +283,11 @@ mod imp {
 
     /// Called once the core is up: restart the tunnel if one is installed.
     pub fn boot(app: &tauri::AppHandle) {
+        let _ = APP.set(app.clone());
         let _g = OP.lock().unwrap();
         let Some(cfg) = load_config(app) else { return };
         if let Err(e) = start(app, cfg) {
-            crate::log(&format!("dns tunnel: start failed: {e}"));
+            tlog("error", &format!("start failed: {e}"));
         }
     }
 
@@ -294,7 +321,7 @@ mod imp {
         if let Some(path) = config_path(app) {
             let _ = std::fs::remove_file(path);
         }
-        crate::log("dns tunnel: removed");
+        tlog("info", "removed");
         tauri::async_runtime::spawn(apply_proxy());
         Ok(())
     }
@@ -312,6 +339,7 @@ mod imp {
         if let Some(net) = network_info() {
             v["network"] = net;
         }
+        v["shell_events"] = Value::from(SHELL_EVENTS.lock().unwrap().iter().cloned().collect::<Vec<_>>());
         v
     }
 

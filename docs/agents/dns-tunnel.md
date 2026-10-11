@@ -67,6 +67,17 @@ IO scheduler on every flip and can't fall back per connection.
 re-applies it so profiles added later pick it up. Removing the tunnel clears
 only our value.
 
+## Diagnostics chat
+
+Tunnel events show up in Velta Diagnostics with a "DNS tunnel:" prefix.
+Router events come from the Go event ring; shell events (start, proxy set
+per profile, restart on network change, errors) from a 100-line ring in
+tunnel.rs (`SHELL_EVENTS`, returned as `shell_events` by tunnel_status), so
+lines logged while the WebView sleeps are not lost. `initTunnelDiagnostics`
+(tunnel.js) polls every 20 s, on resume and on the `velta-tunnel-log` wake-up
+event, and appends only events newer than a high-water mark kept in
+localStorage (no repeats after a UI reload).
+
 ## Known limits
 
 - The core puts a 60 s read/write timeout on every socket, proxied ones

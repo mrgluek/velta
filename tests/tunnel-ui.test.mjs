@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning, pathLines } = await import("../app/js/tunnel.js");
+const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning, pathLines, tunnelEventRows, initTunnelDiagnostics } = await import("../app/js/tunnel.js");
 const { classifyScannedCode } = await import("../app/js/qr-actions.js");
 
 const LINK = "velta://tunnel?v=1&zone=t.example.org&key=AAAA";
@@ -115,4 +115,34 @@ test("path table: working paths first, durations in ms", () => {
   assert.match(lines[2], /77\.88\.8\.1:53 udp suspended rtt=110ms/);
   assert.match(lines[3], /77\.88\.8\.8:853 dot unverified rtt=- loss=1\.00 answers=0/);
   assert.deepEqual(pathLines(undefined), ["paths: none (tunnel not started)"]);
+});
+
+test("router and shell events merge in time order with levels", () => {
+  const rows = tunnelEventRows({
+    events: [
+      { t: "2026-10-11T19:44:43.525831015Z", msg: "route direct -> tunnel (mode always)" },
+      { t: "2026-10-11T19:45:00Z", msg: "state direct -> blocked (relays 0/1 ok, canary ok=true)" },
+    ],
+    shell_events: [{ t_ms: Date.parse("2026-10-11T19:44:50Z"), level: "info", msg: "proxy set for account 1; restarting its IO" }],
+  });
+  assert.deepEqual(rows.map(r => r.level + " " + r.msg.split(" ").slice(0, 3).join(" ")), [
+    "info route direct ->",
+    "info proxy set for",
+    "warning state direct ->",
+  ]);
+});
+
+test("diagnostics mirror appends only new events, across polls and UI reloads", async () => {
+  const store = {};
+  globalThis.localStorage = { getItem: k => store[k] ?? null, setItem: (k, v) => { store[k] = String(v); } };
+  let status = { installed: true, events: [{ t: "2026-10-11T10:00:00Z", msg: "started" }], shell_events: [] };
+  const invoke = async () => status;
+  const lines = [];
+  const append = (level, text) => lines.push(`${level}:${text}`);
+  const a = initTunnelDiagnostics({ append, invoke, listen: null, intervalMs: 1e9 });
+  await a.ready; a.stop();
+  status = { installed: true, events: [...status.events, { t: "2026-10-11T10:00:05Z", msg: "direct dial x failed" }], shell_events: [] };
+  const b = initTunnelDiagnostics({ append, invoke, listen: null, intervalMs: 1e9 }); // a UI reload
+  await b.ready; b.stop();
+  assert.deepEqual(lines, ["info:DNS tunnel: started", "warning:DNS tunnel: direct dial x failed"]);
 });

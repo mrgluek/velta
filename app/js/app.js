@@ -19,7 +19,7 @@ import { acquireCode, mountScanner } from "./qr-scan.js";
 import { scanTabAvailable, canShareLink, copyLink, shareLink, classifyScannedCode } from "./qr-actions.js";
 import { parseSharePayload, shareTextIfUnconsumed, sharePlan, createShareInbox, buildSharePicker } from "./share-in.js";
 import { linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_LABELS } from "./link-preview.js";
-import { extractTunnelLink, acceptTunnelLink, openTunnelSettings, refreshTunnelStatus, tunnelInstalled, tunnelStatus, describeTunnel, bindTunnelNetworkEvents } from "./tunnel.js";
+import { extractTunnelLink, acceptTunnelLink, openTunnelSettings, refreshTunnelStatus, tunnelInstalled, tunnelStatus, describeTunnel, bindTunnelNetworkEvents, initTunnelDiagnostics } from "./tunnel.js";
 import { wrapIdentityBundle, unwrapIdentityBundle, buildIdentityBundle, bytesToBase64, base64ToBytes, backupDownloadName, gzipBytes } from "./identity-backup.js";
 
 const diagnostics = new DiagnosticsStore();
@@ -5426,6 +5426,8 @@ async function boot() {
     // Optional DNS tunnel: show its drawer row only once one is installed.
     refreshTunnelStatus().then(s => { if (s.installed) rebuildDrawer(); });
     bindTunnelNetworkEvents();
+    // Route switches, proxy changes and tunnel errors go to Velta Diagnostics.
+    initTunnelDiagnostics({ append: (level, text) => diagnostics.append(level, text) });
 
     appLog("boot: handleDeeplink");
     // Before any chat link is routed: a cold-start notification is parked in
