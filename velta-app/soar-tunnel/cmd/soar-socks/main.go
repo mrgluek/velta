@@ -25,6 +25,7 @@ func main() {
 	user := flag.String("user", "", "SOCKS5 username (empty = no auth)")
 	pass := flag.String("pass", "", "SOCKS5 password")
 	every := flag.Duration("status", time.Minute, "print a status line this often (0 = never)")
+	paths := flag.Bool("paths", false, "also print one line per resolver path with each status")
 	flag.Parse()
 
 	cfg, err := tunnel.ParseLink(*link)
@@ -63,7 +64,13 @@ func main() {
 				}
 			}
 			line, _ := json.Marshal(map[string]any{"route": s.Route, "state": s.State, "active": s.Active, "stats": s.Stats})
-			fmt.Fprintf(os.Stderr, "%s status %s\n", time.Now().Format("15:04:05"), line)
+			fmt.Fprintf(os.Stderr, "%s status %s session=%v\n", time.Now().Format("15:04:05"), line, s.Session)
+			if *paths {
+				for _, p := range s.Paths {
+					fmt.Fprintf(os.Stderr, "  %-28s %-4s verified=%-5v susp=%-5v rtt=%-6v loss=%.2f win=%.1f name=%d ans=%d ok=%d\n",
+						p.Resolver, p.Transport, p.Verified, p.Suspended, p.RTT.Round(time.Millisecond), p.Loss, p.Window, p.NameLen, p.AnswerBytes, p.Successes)
+				}
+			}
 		}
 	}
 }

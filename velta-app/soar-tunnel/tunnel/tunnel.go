@@ -550,7 +550,11 @@ type Status struct {
 	Active     map[string]int        `json:"active"`
 	Stats      map[string]routeStats `json:"stats"`
 	Soar       string                `json:"soar"`
-	Events     []Event               `json:"events"`
+	// Session is whether the soar session with the server is up; Paths is
+	// one row per resolver path (which resolvers carry the tunnel here).
+	Session bool            `json:"session"`
+	Paths   []soar.PathStat `json:"paths"`
+	Events  []Event         `json:"events"`
 }
 
 // Status returns a snapshot with the last n events.
@@ -580,6 +584,16 @@ func (t *Tunnel) Status(n int) Status {
 		s.Active[c.route.String()]++
 	}
 	s.Events = t.log.last(n)
+	if t.client != nil {
+		s.Session = t.client.Established()
+		s.Paths = t.client.PathStats()
+		for i, p := range s.Paths {
+			// DoT paths are soar TCP paths to port 853 (dialResolver wraps TLS).
+			if _, port, err := net.SplitHostPort(p.Resolver); err == nil && port == "853" && p.Transport == "tcp" {
+				s.Paths[i].Transport = "dot"
+			}
+		}
+	}
 	return s
 }
 
@@ -593,6 +607,9 @@ func soarVersion() string {
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		for _, d := range bi.Deps {
 			if d.Path == "github.com/getlantern/soar" {
+				if d.Replace != nil {
+					return d.Replace.Path + "@" + d.Replace.Version
+				}
 				return d.Version
 			}
 		}

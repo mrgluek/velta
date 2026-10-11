@@ -81,6 +81,23 @@ function kb(n) {
   return `${Math.round((n || 0) / 1024)} KB`;
 }
 
+/** One line per resolver path, working ones first (most answers first):
+ * which resolvers carry the tunnel on this network. Durations arrive in ns. */
+export function pathLines(paths) {
+  if (!Array.isArray(paths) || !paths.length) return ["paths: none (tunnel not started)"];
+  const rows = [...paths].sort((a, b) =>
+    (b.verified - a.verified) || ((b.successes || 0) - (a.successes || 0)));
+  const ok = rows.filter(p => p.verified).length;
+  return [
+    `paths: ${ok}/${rows.length} verified`,
+    ...rows.map(p => {
+      const state = p.dead ? "dead" : p.suspended ? "suspended" : p.verified ? "ok" : "unverified";
+      const rtt = p.rtt ? `${Math.round(p.rtt / 1e6)}ms` : "-";
+      return `  ${p.resolver} ${p.transport} ${state} rtt=${rtt} loss=${(p.loss || 0).toFixed(2)} answers=${p.successes || 0} name=${p.name_len} ans=${p.answer_max}`;
+    }),
+  ];
+}
+
 /** Plain-text diagnostics for sharing: routing state and events, never message content. */
 export function tunnelReport(s, { app = "", now = new Date() } = {}) {
   const lines = [
@@ -98,7 +115,7 @@ export function tunnelReport(s, { app = "", now = new Date() } = {}) {
     const st = s.stats?.[r] || {};
     lines.push(`${r}: active ${s.active?.[r] ?? 0}, conns ${st.conns ?? 0}, fails ${st.fails ?? 0}, up ${kb(st.up)}, down ${kb(st.down)}`);
   }
-  lines.push("", "events:");
+  lines.push("", ...pathLines(s.paths), "", "events:");
   for (const e of s.events || []) lines.push(`${e.t} ${e.msg}`);
   return lines.filter(l => l !== null).join("\n");
 }
@@ -177,7 +194,7 @@ export async function openTunnelSettings({ showModal, confirmModal, toast, errTo
       ${MODES.map(([v, label, hint]) => `<label class="scale-opt" title="${esc(hint)}"><input type="radio" name="tunnel-mode" value="${v}"${s.mode === v ? " checked" : ""}><span>${esc(label)}</span></label>`).join("")}
     </fieldset>
     <div class="bar-opts-hint" data-tunnel-hint>${esc((MODES.find(m => m[0] === s.mode) || MODES[0])[2])}</div>
-    <p class="p2p-hint">Server: ${esc(s.zone || "?")} · ${esc(s.resolvers ?? "?")} resolvers · soar ${esc(s.soar || "?")}</p>
+    <p class="p2p-hint">Server: ${esc(s.zone || "?")} · ${Array.isArray(s.paths) ? `${s.paths.filter(p => p.verified).length} of ${s.paths.length} resolver paths working` : `${esc(s.resolvers ?? "?")} resolvers`}${s.session ? " · session up" : ""}</p>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
       <button type="button" class="btn-text" data-tunnel-share>Share diagnostics…</button>
       <button type="button" class="btn-text" data-tunnel-remove style="color:var(--danger)">Remove the tunnel</button>

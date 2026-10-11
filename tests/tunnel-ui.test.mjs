@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning } = await import("../app/js/tunnel.js");
+const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning, pathLines } = await import("../app/js/tunnel.js");
 const { classifyScannedCode } = await import("../app/js/qr-actions.js");
 
 const LINK = "velta://tunnel?v=1&zone=t.example.org&key=AAAA";
@@ -102,4 +102,17 @@ test("Private DNS warning and network lines", () => {
     network_resolvers: ["10.0.0.1:53"], events: [] });
   assert.match(text, /network: cellular {2}operator: 25001 MTS RUS {2}private dns: off/);
   assert.match(text, /network resolvers: 10\.0\.0\.1:53/);
+});
+
+test("path table: working paths first, durations in ms", () => {
+  const lines = pathLines([
+    { resolver: "77.88.8.8:853", transport: "dot", verified: false, successes: 0, loss: 1, name_len: 253, answer_max: 512 },
+    { resolver: "8.8.8.8:53", transport: "udp", verified: true, successes: 40, rtt: 62e6, loss: 0.15, name_len: 253, answer_max: 1232 },
+    { resolver: "77.88.8.1:53", transport: "udp", verified: true, successes: 3, rtt: 110e6, suspended: true, name_len: 253, answer_max: 512 },
+  ]);
+  assert.equal(lines[0], "paths: 2/3 verified");
+  assert.match(lines[1], /^ {2}8\.8\.8\.8:53 udp ok rtt=62ms loss=0\.15 answers=40 name=253 ans=1232$/);
+  assert.match(lines[2], /77\.88\.8\.1:53 udp suspended rtt=110ms/);
+  assert.match(lines[3], /77\.88\.8\.8:853 dot unverified rtt=- loss=1\.00 answers=0/);
+  assert.deepEqual(pathLines(undefined), ["paths: none (tunnel not started)"]);
 });

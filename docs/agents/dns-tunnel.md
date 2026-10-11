@@ -66,6 +66,17 @@ IO scheduler on every flip and can't fall back per connection.
 re-applies it so profiles added later pick it up. Removing the tunnel clears
 only our value.
 
+## soar fork (path stats)
+
+`go.mod` replaces `github.com/getlantern/soar` with `github.com/mrgluek/soar`
+(branch `path-stats`): upstream at the pinned commit plus `Client.PathStats()`
+and `Client.Established()`, because path state is otherwise internal and the
+`SOAR_DEBUG` dump goes to stderr, which Android loses. The status JSON
+carries `paths` (per resolver: transport udp/tcp/dot, verified, suspended,
+RTT in ns, loss, window, name length, answer size, successes) and the
+report prints them working-first; `soar-socks -paths` prints the same table.
+Drop the replace once upstream has an equivalent API.
+
 ## soar tuning
 
 soar is pre-release (protocol may change; server and client must be
