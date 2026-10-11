@@ -33,7 +33,13 @@ Paths in order: the resolvers the phone's current network handed out
 (`NetInfo.kt`: the operator's DNS on mobile data, the one that keeps
 answering under an allowlist), then the SIM operator's known resolvers by
 MCC+MNC (`tunnel/operators.go`), then the link's `r`, then the defaults.
-`tunnel.rs` restarts the tunnel when the network's resolvers or the operator
+Before handing the list to soar the tunnel drops private-address resolvers
+(RFC 1918, CGNAT, ULA) that the current network did not hand out — operator
+internal resolvers only answer on their own network, where they arrive as
+the network's DNS anyway — drops IPv6 resolvers when there is no IPv6 route,
+and moves IPv6 after IPv4: soar sends its first hellos down the first paths,
+and a 464XLAT mobile network was seen with an IPv6 route but no working IPv6
+DNS. `tunnel.rs` restarts the tunnel when the network's resolvers or the operator
 change (checked every minute and on `tunnel_network_changed`). Defaults are public resolvers (NSDI, MSK-IX,
 Yandex basic/Safe/Family incl. IPv6 and DoT, SafeDNS, Google, Quad9) and
 canaries `ya.ru`, `max.ru`, `gosuslugi.ru`. Like `dcbackup:`, a tunnel link can come from any

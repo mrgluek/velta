@@ -384,3 +384,18 @@ func TestWithoutIPv6(t *testing.T) {
 		t.Fatalf("got %v (%d dropped)", out, n)
 	}
 }
+
+func TestPrivateResolversOnlyFromTheNetwork(t *testing.T) {
+	in := []string{"10.0.0.1:53", "77.88.8.8:53", "10.77.135.4:53", "100.64.1.1:53", "[fd00::1]:53", "192.168.8.1:53"}
+	out, n := withoutForeignPrivate(in, []string{"10.0.0.1:53", "192.168.8.1:53"})
+	if n != 3 || strings.Join(out, ",") != "10.0.0.1:53,77.88.8.8:53,192.168.8.1:53" {
+		t.Fatalf("got %v (%d dropped)", out, n)
+	}
+}
+
+func TestIPv4First(t *testing.T) {
+	in := []string{"[2a00::1]:53", "10.0.0.1:53", "[2a02::2]:53", "77.88.8.8:853"}
+	if got := strings.Join(ipv4First(in), ","); got != "10.0.0.1:53,77.88.8.8:853,[2a00::1]:53,[2a02::2]:53" {
+		t.Fatalf("got %s", got)
+	}
+}

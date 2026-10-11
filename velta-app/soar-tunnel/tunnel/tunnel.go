@@ -121,7 +121,8 @@ func Start(cfg Config) (*Tunnel, error) {
 		return nil, err
 	}
 	key, _ := base64.StdEncoding.DecodeString(cfg.Key)
-	resolvers := cfg.Effective()
+	resolvers, skippedPrivate := withoutForeignPrivate(cfg.Effective(), cfg.SystemResolvers)
+	resolvers = ipv4First(resolvers)
 	skipped6 := 0
 	if !hasIPv6Route() {
 		// Without an IPv6 route these paths can only fail, and soar would
@@ -172,6 +173,9 @@ func Start(cfg Config) (*Tunnel, error) {
 		len(cfg.SystemResolvers), cfg.Operator, len(OperatorResolvers[cfg.Operator]), soarVersion())
 	if skipped6 > 0 {
 		t.log.add("no IPv6 route: skipped %d IPv6 resolvers", skipped6)
+	}
+	if skippedPrivate > 0 {
+		t.log.add("skipped %d private-address resolvers this network did not hand out", skippedPrivate)
 	}
 	t.wg.Add(2)
 	go t.serve()
@@ -566,6 +570,54 @@ func hasIPv6Route() bool {
 	}
 	c.Close()
 	return true
+}
+
+// withoutForeignPrivate drops resolvers on private addresses (RFC 1918,
+// CGNAT 100.64/10, IPv6 ULA) unless the current network handed them out:
+// they are operators' internal resolvers, reachable only from that
+// operator's own network, where they arrive as the network's DNS anyway.
+// Elsewhere they are dead paths that also take soar's first hello slots.
+func withoutForeignPrivate(resolvers, network []string) ([]string, int) {
+	own := map[string]bool{}
+	for _, r := range network {
+		own[r] = true
+	}
+	out := make([]string, 0, len(resolvers))
+	for _, r := range resolvers {
+		if !own[r] && isPrivateResolver(r) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, len(resolvers) - len(out)
+}
+
+var cgnat = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+func isPrivateResolver(r string) bool {
+	host, _, err := net.SplitHostPort(r)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && (ip.IsPrivate() || cgnat.Contains(ip))
+}
+
+// ipv4First moves IPv6 resolvers after the IPv4 ones, keeping each group's
+// order: soar sends its first hellos down the first paths, and on networks
+// with a route but no working IPv6 (seen on a 464XLAT mobile network) those
+// would be wasted.
+func ipv4First(resolvers []string) []string {
+	var v4, v6 []string
+	for _, r := range resolvers {
+		host, _, err := net.SplitHostPort(r)
+		if ip := net.ParseIP(host); err == nil && ip != nil && ip.To4() == nil {
+			v6 = append(v6, r)
+		} else {
+			v4 = append(v4, r)
+		}
+	}
+	return append(v4, v6...)
 }
 
 // withoutIPv6 drops IPv6 resolvers, returning how many it dropped.
