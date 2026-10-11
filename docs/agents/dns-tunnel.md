@@ -11,7 +11,7 @@ only lets allowlisted sites through. Android only.
 |---|---|
 | `velta-app/soar-tunnel/tunnel` | Go: link parsing, SOCKS5 server (user/pass), DIRECT/TUNNEL router, allowlist monitor, event ring |
 | `velta-app/soar-tunnel/cmd/libsoartunnel` | C ABI (`-buildmode=c-shared`) the shell dlopens |
-| `velta-app/soar-tunnel/cmd/soar-socks` | Same router as a CLI, for Termux/desktop testing without an app build |
+| `velta-app/soar-tunnel/cmd/soar-socks` | Same router as a standalone SOCKS5 proxy (Linux/macOS/Termux): `-link-file`, machine DNS from resolv.conf as first paths (`-system-dns`), `-operator`, `-paths` |
 | `gen/android/.../org/velta/NetInfo.kt` | Network-assigned DNS servers, SIM MCC+MNC, transport, Private DNS state |
 | `velta-app/src-tauri/src/tunnel.rs` | Loads the library, stores `tunnel.json` in app-local data, sets `proxy_url` on every profile, Tauri commands |
 | `app/js/tunnel.js` | Deep link confirm, drawer row + settings sheet, diagnostics share |

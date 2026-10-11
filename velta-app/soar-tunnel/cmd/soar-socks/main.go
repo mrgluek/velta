@@ -1,17 +1,23 @@
-// Command soar-socks runs the Velta tunnel proxy standalone (desktop, or
-// Termux on a phone) for testing the router without an app build:
+// Command soar-socks runs the Velta tunnel proxy standalone (Linux, macOS,
+// or Termux on a phone): the same router and link format as the app.
 //
+//	soar-socks -link-file tunnel-link.txt        # link kept out of argv/history
 //	soar-socks -link 'velta://tunnel?v=1&zone=…&key=…' -listen 127.0.0.1:18000
 //
 // Point Delta Chat at socks5://127.0.0.1:18000 (no auth unless -user is set).
+// Like the app, it puts this machine's own DNS servers (from resolv.conf)
+// first among the tunnel's resolver paths; -system-dns=false turns that off.
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +26,9 @@ import (
 
 func main() {
 	link := flag.String("link", "", "velta://tunnel link")
+	linkFile := flag.String("link-file", "", "read the velta://tunnel link from this file")
+	systemDNS := flag.Bool("system-dns", true, "add this machine's DNS servers (resolv.conf) as first resolver paths")
+	operator := flag.String("operator", "", "SIM operator MCC+MNC (e.g. 25001) to add its known resolvers")
 	mode := flag.String("mode", tunnel.ModeAuto, "auto, always or off")
 	listen := flag.String("listen", "127.0.0.1:18000", "SOCKS5 listen address")
 	user := flag.String("user", "", "SOCKS5 username (empty = no auth)")
@@ -28,18 +37,35 @@ func main() {
 	paths := flag.Bool("paths", false, "also print one line per resolver path with each status")
 	flag.Parse()
 
+	if *linkFile != "" {
+		b, err := os.ReadFile(*linkFile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "soar-socks:", err)
+			os.Exit(2)
+		}
+		*link = strings.TrimSpace(string(b))
+	}
 	cfg, err := tunnel.ParseLink(*link)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "soar-socks:", err)
 		os.Exit(2)
 	}
 	cfg.Mode, cfg.Listen, cfg.User, cfg.Pass = *mode, *listen, *user, *pass
+	cfg.Operator = *operator
+	if *systemDNS {
+		cfg.SystemResolvers = systemResolvers()
+	}
+	if cfg, err = cfg.Normalize(); err != nil {
+		fmt.Fprintln(os.Stderr, "soar-socks:", err)
+		os.Exit(2)
+	}
 	t, err := tunnel.Start(cfg)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "soar-socks:", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "SOCKS5 on %s, mode %s, %d resolvers (%d from the link)\n", t.Addr(), cfg.Mode, len(cfg.Effective()), len(cfg.Resolvers))
+	fmt.Fprintf(os.Stderr, "SOCKS5 on %s, mode %s, %d resolvers (%d system, %d from the link)\n",
+		t.Addr(), cfg.Mode, len(cfg.Effective()), len(cfg.SystemResolvers), len(cfg.Resolvers))
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -73,4 +99,35 @@ func main() {
 			}
 		}
 	}
+}
+
+// systemResolvers reads this machine's DNS servers. With systemd-resolved,
+// /etc/resolv.conf only names the 127.0.0.53 stub, so the real upstream list
+// comes from /run/systemd/resolve/resolv.conf. Loopback entries are skipped:
+// a local stub can't forward to the tunnel zone any better than its upstreams.
+func systemResolvers() []string {
+	for _, path := range []string{"/run/systemd/resolve/resolv.conf", "/etc/resolv.conf"} {
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		var out []string
+		sc := bufio.NewScanner(f)
+		for sc.Scan() {
+			fields := strings.Fields(sc.Text())
+			if len(fields) < 2 || fields[0] != "nameserver" {
+				continue
+			}
+			ip := net.ParseIP(strings.SplitN(fields[1], "%", 2)[0])
+			if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			out = append(out, net.JoinHostPort(ip.String(), "53"))
+		}
+		f.Close()
+		if len(out) > 0 {
+			return out
+		}
+	}
+	return nil
 }
