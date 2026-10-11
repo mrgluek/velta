@@ -98,7 +98,9 @@ mod imp {
     /// NetInfo.kt snapshot: {"dns": ["10.0.0.1:53", …], "sim_operator": "25001",
     /// "transport": "cellular", "private_dns": false, …}.
     fn network_info() -> Option<Value> {
-        let context = crate::APP_CONTEXT.lock().unwrap().as_ref().map(|r| r.as_obj().clone())?;
+        // Keep the guard bound: the JObject borrows the GlobalRef inside it.
+        let ctx_guard = crate::APP_CONTEXT.lock().unwrap();
+        let context = ctx_guard.as_ref().map(|r| r.as_obj().clone())?;
         let vm_guard = crate::APP_JAVA_VM.lock().unwrap();
         let mut env = vm_guard.as_ref()?.attach_current_thread().ok()?;
         let class_guard = crate::APP_NETINFO_CLASS.lock().unwrap();
