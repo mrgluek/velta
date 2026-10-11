@@ -67,21 +67,21 @@ func TestDecide(t *testing.T) {
 	ok := probeResult{Relays: 2, RelayOK: 1, CanaryOK: true}
 	offline := probeResult{Relays: 2}
 
-	r, f, _, s := decide(RouteDirect, blocked, 0, 0)
+	r, f, _, s := decide(RouteDirect, blocked, 0, 0, true)
 	if r != RouteDirect || f != 1 || s != "blocked" {
 		t.Fatalf("one blocked probe must not switch yet: %v %d %s", r, f, s)
 	}
-	r, f, _, _ = decide(r, blocked, f, 0)
+	r, f, _, _ = decide(r, blocked, f, 0, true)
 	if r != RouteTunnel {
 		t.Fatalf("second blocked probe must switch to the tunnel")
 	}
-	r, f, _, s = decide(r, offline, f, 0)
+	r, f, _, s = decide(r, offline, f, 0, true)
 	if r != RouteTunnel || s != "offline" {
 		t.Fatalf("offline must not change the route: %v %s", r, s)
 	}
 	k := 0
 	for i := 1; i <= recoveredAfter; i++ {
-		r, f, k, _ = decide(r, ok, f, k)
+		r, f, k, _ = decide(r, ok, f, k, true)
 		if i < recoveredAfter && r != RouteTunnel {
 			t.Fatalf("switched back after %d ok probes", i)
 		}
@@ -89,7 +89,7 @@ func TestDecide(t *testing.T) {
 	if r != RouteDirect || f != 0 {
 		t.Fatalf("must return to direct after %d ok probes", recoveredAfter)
 	}
-	if r2, _, _, s := decide(RouteDirect, probeResult{}, 0, 0); r2 != RouteDirect || s != "unknown" {
+	if r2, _, _, s := decide(RouteDirect, probeResult{}, 0, 0, true); r2 != RouteDirect || s != "unknown" {
 		t.Fatalf("no known relays must change nothing")
 	}
 }
@@ -401,5 +401,46 @@ func TestIPv4First(t *testing.T) {
 	in := []string{"[2a00::1]:53", "10.0.0.1:53", "[2a02::2]:53", "77.88.8.8:853"}
 	if got := strings.Join(ipv4First(in), ","); got != "10.0.0.1:53,77.88.8.8:853,[2a00::1]:53,[2a02::2]:53" {
 		t.Fatalf("got %s", got)
+	}
+}
+
+func TestFailingTunnelIsLeftAtOnce(t *testing.T) {
+	ok := probeResult{Relays: 3, RelayOK: 3, CanaryOK: true}
+	if r, _, _, _ := decide(RouteTunnel, ok, 0, 0, false); r != RouteDirect {
+		t.Fatal("relays answer directly and the tunnel fails: leave it after one probe")
+	}
+	if r, _, _, _ := decide(RouteTunnel, ok, 0, 0, true); r != RouteTunnel {
+		t.Fatal("a healthy tunnel still waits for recoveredAfter probes")
+	}
+}
+
+func TestAutoAfterAlwaysStartsDirect(t *testing.T) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAlways, echoDialer("D:", &n), echoDialer("T:", &n))
+	if err := tt.SetMode(ModeAuto); err != nil {
+		t.Fatal(err)
+	}
+	if s := tt.Status(0); s.Route != "direct" {
+		t.Fatalf("auto must start direct, got %s", s.Route)
+	}
+}
+
+func TestTunnelFailuresMarkItUnhealthy(t *testing.T) {
+	var d, tu atomic.Int32
+	tt := newTestTunnel(t, ModeAlways, echoDialer("D:", &d), failDialer(&tu))
+	c, _ := socksConnect(t, tt.Addr(), "u", "p", "relay.example.org:993")
+	c.Close()
+	tt.mu.Lock()
+	fails := tt.tunnelFails
+	tt.mu.Unlock()
+	if fails != 1 {
+		t.Fatalf("tunnel failures since the switch: %d", fails)
+	}
+	tt.SetMode(ModeAuto) // route change resets the count
+	tt.mu.Lock()
+	fails = tt.tunnelFails
+	tt.mu.Unlock()
+	if fails != 0 {
+		t.Fatalf("count must reset on a route change: %d", fails)
 	}
 }

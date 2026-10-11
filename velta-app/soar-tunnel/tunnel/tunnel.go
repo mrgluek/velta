@@ -76,20 +76,21 @@ type Tunnel struct {
 	dialTunnel dialFunc
 	probeTLS   func(ctx context.Context, hostport, sni string) error
 
-	mu         sync.Mutex
-	mode       string
-	route      Route
-	routeSince time.Time
-	routeGen   atomic.Int64 // bumped on every route change, for the shell to nudge the core
-	conns      map[*tracked]struct{}
-	relays     map[string]time.Time // relay host -> last seen in a CONNECT
-	relayPorts map[string]string    // relay host -> TLS port to probe (the one the core used)
-	failStreak int
-	okStreak   int
-	state      string
-	lastProbe  time.Time
-	lastResult probeResult
-	stats      [2]routeStats
+	mu          sync.Mutex
+	mode        string
+	route       Route
+	routeSince  time.Time
+	routeGen    atomic.Int64 // bumped on every route change, for the shell to nudge the core
+	tunnelFails int          // tunnel dial failures since the route last changed
+	conns       map[*tracked]struct{}
+	relays      map[string]time.Time // relay host -> last seen in a CONNECT
+	relayPorts  map[string]string    // relay host -> TLS port to probe (the one the core used)
+	failStreak  int
+	okStreak    int
+	state       string
+	lastProbe   time.Time
+	lastResult  probeResult
+	stats       [2]routeStats
 	// Bytes per route, counted as they flow: IMAP IDLE connections live for
 	// hours, so totals taken at close would show nothing for them.
 	upBytes   [2]atomic.Int64
@@ -234,6 +235,11 @@ func (t *Tunnel) SetMode(mode string) error {
 		t.setRouteLocked(RouteTunnel, "mode always")
 	case ModeOff:
 		t.setRouteLocked(RouteDirect, "mode off")
+	case ModeAuto:
+		// Start auto from direct, not from whatever Always left behind:
+		// the monitor moves to the tunnel itself if the relays are blocked,
+		// and mail stuck in a tunnel that doesn't work here gets out at once.
+		t.setRouteLocked(RouteDirect, "mode auto")
 	}
 	t.mu.Unlock()
 	t.log.add("mode set to %s", mode)
@@ -265,6 +271,7 @@ func (t *Tunnel) setRouteLocked(r Route, reason string) {
 	old := t.route
 	t.route = r
 	t.routeSince = time.Now()
+	t.tunnelFails = 0
 	if reason != "start" {
 		t.routeGen.Add(1)
 		t.log.add("route %s -> %s (%s)", old, r, reason)
@@ -313,6 +320,9 @@ func (t *Tunnel) handle(c net.Conn) {
 	if err != nil {
 		t.mu.Lock()
 		t.stats[route].Fails++
+		if route == RouteTunnel {
+			t.tunnelFails++
+		}
 		t.mu.Unlock()
 		t.log.add("%s dial %s failed: %v", route, addr, err)
 		socksReply(c, repHostUnreachable)
@@ -435,7 +445,7 @@ func (t *Tunnel) nextProbeIn() time.Duration {
 	case t.state == "offline":
 		return 30 * time.Second
 	case t.route == RouteTunnel:
-		return time.Minute
+		return 30 * time.Second
 	case t.failStreak > 0:
 		return 15 * time.Second
 	case t.state == "unknown":
@@ -505,7 +515,8 @@ func (t *Tunnel) applyProbe(res probeResult) {
 	defer t.mu.Unlock()
 	t.lastProbe = time.Now()
 	t.lastResult = res
-	route, fail, ok, state := decide(t.route, res, t.failStreak, t.okStreak)
+	healthy := t.tunnelFails == 0 && (t.client == nil || t.client.Established())
+	route, fail, ok, state := decide(t.route, res, t.failStreak, t.okStreak, healthy)
 	if state != t.state {
 		t.log.add("state %s -> %s (relays %d/%d ok, canary ok=%v)", t.state, state, res.RelayOK, res.Relays, res.CanaryOK)
 	}
@@ -517,16 +528,20 @@ func (t *Tunnel) applyProbe(res probeResult) {
 
 // decide is the monitor's state machine, kept pure for tests.
 //   - any relay answering directly means the network is normal (one dead
-//     relay is that relay's problem, not an allowlist);
+//     relay is that relay's problem, not an allowlist); leaving the tunnel
+//     takes recoveredAfter such probes, or one if the tunnel is failing;
 //   - every relay failing while the canary answers means "blocked";
 //   - everything failing means "offline": change nothing.
-func decide(route Route, res probeResult, failStreak, okStreak int) (Route, int, int, string) {
+func decide(route Route, res probeResult, failStreak, okStreak int, tunnelHealthy bool) (Route, int, int, string) {
 	switch {
 	case res.Relays == 0:
 		return route, failStreak, okStreak, "unknown"
 	case res.RelayOK > 0:
 		okStreak++
-		if route == RouteTunnel && okStreak >= recoveredAfter {
+		// A working tunnel waits for recoveredAfter good probes (no
+		// flapping); a failing one is left after the first: the relays
+		// answer directly, and mail is better off there right now.
+		if route == RouteTunnel && (okStreak >= recoveredAfter || !tunnelHealthy) {
 			route = RouteDirect
 		}
 		return route, 0, okStreak, "direct"
