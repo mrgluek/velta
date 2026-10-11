@@ -145,12 +145,12 @@ owner-match firewall chain on the server.
 ## Choosing resolvers: field check with Globalping
 
 A resolver is useful only if it forwards queries for the tunnel zone to the
-server. Check from Russian residential networks with Globalping, reusing one
+server. Check from residential networks in the target region with Globalping, reusing one
 probe set so rows are comparable, and watch arrivals on the server:
 
 ```bash
-# probe set: 10 RU residential probes
-globalping dns g0x$(openssl rand -hex 3).<tunnel-zone> --resolver 77.88.8.8 --type TXT --from "RU+eyeball-network" --limit 10 --json
+# probe set: 10 residential probes in the target region (<cc> = its country code)
+globalping dns g0x$(openssl rand -hex 3).<tunnel-zone> --resolver 77.88.8.8 --type TXT --from "<cc>+eyeball-network" --limit 10 --json
 # then per resolver, same probes (unique name per resolver):
 globalping dns g7x$(openssl rand -hex 3).<tunnel-zone> --resolver <ip> --type TXT --from <first-measurement-id> --json
 # on the server, which names arrived:
@@ -166,7 +166,7 @@ addresses all worked from the one MTS probe. That is why they are not
 defaults: every dead path costs throughput for everyone else. They come from
 the phone's own network DNS and the SIM's MCC+MNC instead.
 
-Second run, all 28 RU residential probes, first measurement without
+Second run, all 28 residential probes in the region, first measurement without
 `--resolver` (each probe's ISP-assigned DNS): 20/28 forwarded the zone,
 mostly through the home router — evidence for putting the network's own DNS
 first. MTS's seven resolvers again answered only MTS probes; its regional

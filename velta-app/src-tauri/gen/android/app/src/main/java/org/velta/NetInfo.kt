@@ -47,7 +47,7 @@ object NetInfo {
         out.put("dns", dns)
         try {
             val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-            // MCC+MNC of the SIM, e.g. 25001 = MTS Russia. No permission needed.
+            // MCC+MNC of the SIM, e.g. 25001. No permission needed.
             out.put("sim_operator", tm.simOperator ?: "")
             out.put("network_operator", tm.networkOperator ?: "")
             out.put("operator_name", tm.networkOperatorName ?: "")

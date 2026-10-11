@@ -31,14 +31,14 @@ const (
 // more). Ports 853 are DNS-over-TLS paths.
 //
 // Selection (2026-10): each one carried a query for the tunnel zone to the
-// server from Russian residential networks (Globalping eyeball probes).
+// server from residential networks in the target region (Globalping
+// eyeball probes).
 // Left out: Cloudflare (SERVFAIL from most probes), SkyDNS (filters the
 // zone), Comss/Xbox DNS (smart-DNS proxies, SERVFAIL), MSK-IX IPv6
 // (SERVFAIL), and operator resolvers, which only answer their own
 // subscribers (a link can add them with r=).
 var DefaultResolvers = []string{
-	// NSDI, the national resolver: fastest paths measured, reported working
-	// in allowlist mode.
+	// NSDI: fastest paths measured, reported working in allowlist mode.
 	"195.208.4.1:53", "195.208.5.1:53", "[2a0c:a9c7:8::1]:53",
 	// MSK-IX.
 	"62.76.62.76:53", "62.76.76.62:53",
@@ -48,7 +48,7 @@ var DefaultResolvers = []string{
 	"77.88.8.88:53", "77.88.8.2:53", "[2a02:6b8::feed:bad]:53", "[2a02:6b8:0:1::feed:bad]:53",
 	"77.88.8.7:53", "77.88.8.3:53", "[2a02:6b8::feed:a11]:53", "[2a02:6b8:0:1::feed:a11]:53",
 	"77.88.8.8:853", "77.88.8.1:853", "77.88.8.88:853", "77.88.8.7:853",
-	// TransTeleCom "Public Servers": open, answered all 28 RU probes.
+	// TransTeleCom "Public Servers": open, answered all 28 regional probes.
 	"217.150.34.129:53",
 	// SafeDNS, Google, Quad9.
 	"195.46.39.39:53", "195.46.39.40:53",
