@@ -143,6 +143,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 ├── docs/research/wasm-core-lock-landing-plan.md   # ordered review/merge steps for the core/Cargo.lock diff at landing
 ├── docs/research/websockify-c3-deploy.md          # C3 runbook: deploy the websockify-c3 relay, verify, RELAY_WS_URL e2e
 ├── docs/research/ws-relay-endpoints-probe.md      # external WS endpoints vs the C3 contract — chatmail.uk /ygg-ws = Yggdrasil peering, not a mail tunnel (10-09)
+├── docs/research/ru-dns-resolvers.md            # RU resolver inventory (public, NSDI, operator, hosting) + whitelist-mode field reports + probe script (10-11)
 ├── docs/research/wasm-patches/   # 10-patch wasm series (series.txt, VENDORED.md, pinned locks + PROVENANCE)
 ├── packages/deltachat-wasm/      # MPL wasm wrapper — README = local wasm-pack build + e2e recipes
 ├── scripts/build-pwa.mjs         # C4 PWA dist builder (app/ + wasm assets + pwa-config.js + precache SW) — §4.2.1
