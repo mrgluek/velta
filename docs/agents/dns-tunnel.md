@@ -25,9 +25,9 @@ velta://tunnel?v=1&zone=<tunnel-zone>&key=<base64 ed25519 pubkey>[&r=<ip:port,â€
 ```
 
 `r` overrides the resolver list (IP literals only; port 853 = DNS-over-TLS),
-`c` the allowlist canaries. Defaults are public resolvers (MSK-IX, Yandex
-basic/Safe/Family incl. IPv6 and DoT, Google) and canaries `ya.ru`,
-`max.ru`, `gosuslugi.ru`. Like `dcbackup:`, a tunnel link can come from any
+`c` the allowlist canaries. Defaults are public resolvers (NSDI, MSK-IX,
+Yandex basic/Safe/Family incl. IPv6 and DoT, SafeDNS, Google, Quad9) and
+canaries `ya.ru`, `max.ru`, `gosuslugi.ru`. Like `dcbackup:`, a tunnel link can come from any
 page, so it is applied only after `confirmModal`. Without a link nothing
 starts and the app is upstream Velta. The shell never logs the link.
 
@@ -75,3 +75,27 @@ owner-match firewall chain on the server.
 - A static (`CGO_ENABLED=0`) Go binary on Android can't resolve hostnames;
   the c-shared library uses cgo and the system resolver, and resolvers are
   IP literals anyway.
+
+## Choosing resolvers: field check with Globalping
+
+A resolver is useful only if it forwards queries for the tunnel zone to the
+server. Check from Russian residential networks with Globalping, reusing one
+probe set so rows are comparable, and watch arrivals on the server:
+
+```bash
+# probe set: 10 RU residential probes
+globalping dns g0x$(openssl rand -hex 3).<tunnel-zone> --resolver 77.88.8.8 --type TXT --from "RU+eyeball-network" --limit 10 --json
+# then per resolver, same probes (unique name per resolver):
+globalping dns g7x$(openssl rand -hex 3).<tunnel-zone> --resolver <ip> --type TXT --from <first-measurement-id> --json
+# on the server, which names arrived:
+tcpdump -lni <iface> 'udp dst port 53' | grep -oiE 'g[0-9]+x[a-f0-9]{6}\.<tunnel-zone>'
+```
+
+NOERROR/NXDOMAIN plus an arrival = the path works. Results 2026-10-11 (10
+probes, no allowlist active): Yandex (all six v4), SafeDNS and Quad9 10/10;
+NSDI 9 and 7/10; MSK-IX 9 and 4/10; Google 9/10; Cloudflare 4/10 (SERVFAIL);
+SkyDNS 0 (filters the zone). Operator resolvers (MTS, Beeline, MegaFon,
+Tele2, Rostelecom) answered only probes on their own network â€” MTS's seven
+addresses all worked from the one MTS probe. That is why they are not
+defaults: every dead path costs throughput for everyone else. A better
+source for them is the phone's own operator-assigned DNS (not wired yet).

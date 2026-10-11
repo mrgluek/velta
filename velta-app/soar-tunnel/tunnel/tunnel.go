@@ -35,7 +35,7 @@ func (r Route) String() string {
 	return "direct"
 }
 
-// soar tuning measured on Yandex/MSK-IX paths (2026-10): soar's default
+// soar tuning measured on Yandex/NSDI paths (2026-10): soar's default
 // 101-char starting name length never grew there and capped upload at
 // ~1.5 KB/s; full-length names and a wider per-path window gave ~4x.
 const (
