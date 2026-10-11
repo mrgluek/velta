@@ -110,6 +110,7 @@ export function tunnelReport(s, { app = "", now = new Date() } = {}) {
     `relays: ${(s.relays || []).join(", ") || "none yet"}`,
     `network: ${s.network?.transport || "?"}  operator: ${s.network?.sim_operator || s.operator || "?"} ${s.network?.operator_name || ""}  private dns: ${s.network?.private_dns ? s.network.private_dns_name || "on" : "off"}`,
     `network resolvers: ${(s.network_resolvers || []).join(", ") || "none"}`,
+    `dns interception: ${s.dns_intercepted ? `yes${s.dns_egress ? `, answered via ${s.dns_egress}` : ""}` : "no"}`,
   ];
   for (const r of ["direct", "tunnel"]) {
     const st = s.stats?.[r] || {};
@@ -254,6 +255,14 @@ export function privateDnsWarning(s) {
   return `<p class="p2p-hint" style="color:var(--danger)">Private DNS is on${name}. It intercepts the tunnel's DNS queries and makes it much slower. Turn it off in Android Settings → Network → Private DNS while you need the tunnel.</p>`;
 }
 
+/** The network redirects all port-53 traffic to one resolver: plain-DNS
+ * paths collapse into that one, and only DNS-over-TLS gets past it. */
+export function interceptionWarning(s) {
+  if (!s?.dns_intercepted) return "";
+  const via = s.dns_egress ? ` (answered via ${esc(s.dns_egress)})` : "";
+  return `<p class="p2p-hint" style="color:var(--danger)">This network intercepts DNS${via}: every plain-DNS resolver path goes through one resolver, so the tunnel relies on DNS-over-TLS here and may be slow. Check the router's DNS settings.</p>`;
+}
+
 /** Settings sheet: state, mode, diagnostics, removal. */
 export async function openTunnelSettings({ showModal, confirmModal, toast, errToast, onChange, appVersion = "", invoke = shellInvoke() }) {
   if (!invoke) return;
@@ -262,6 +271,7 @@ export async function openTunnelSettings({ showModal, confirmModal, toast, errTo
   body.innerHTML = `
     <p class="p2p-hint" data-tunnel-state>${stateHtml(s)}</p>
     ${privateDnsWarning(s)}
+    ${interceptionWarning(s)}
     <fieldset class="scale-opts" data-tunnel-modes>
       <legend class="vh">Tunnel mode</legend>
       ${MODES.map(([v, label, hint]) => `<label class="scale-opt" title="${esc(hint)}"><input type="radio" name="tunnel-mode" value="${v}"${s.mode === v ? " checked" : ""}><span>${esc(label)}</span></label>`).join("")}

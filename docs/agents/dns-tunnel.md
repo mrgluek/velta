@@ -73,6 +73,18 @@ IO scheduler on every flip and can't fall back per connection.
 re-applies it so profiles added later pick it up. Removing the tunnel clears
 only our value.
 
+## DNS interception
+
+Some networks redirect all port-53 traffic to one resolver (seen: a home
+router forwarding everything to NextDNS, another to China's 114DNS — every
+"path" then showed the same ~450 ms RTT and died after a few answers). At
+start the tunnel sends an A query to two RFC 5737 TEST-NET addresses
+(`interceptProbeTargets`, 0.8 s): no DNS server lives there, so any answer
+was forged on the way. Then DoT paths go first (they are the only real
+paths), Diagnostics says so, `whoami.akamai.net` via 77.88.8.8 names the
+resolver that really answers, and the status carries `dns_intercepted` /
+`dns_egress` for the report and a warning in the settings sheet.
+
 ## Diagnostics chat
 
 Tunnel events show up in Velta Diagnostics with a "DNS tunnel:" prefix.

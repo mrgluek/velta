@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning, pathLines, tunnelEventRows, initTunnelDiagnostics, pathsSummary } = await import("../app/js/tunnel.js");
+const { extractTunnelLink, describeTunnel, tunnelReport, acceptTunnelLink, tunnelInstalled, refreshTunnelStatus, privateDnsWarning, pathLines, tunnelEventRows, initTunnelDiagnostics, pathsSummary, interceptionWarning } = await import("../app/js/tunnel.js");
 const { classifyScannedCode } = await import("../app/js/qr-actions.js");
 
 const LINK = "velta://tunnel?v=1&zone=t.example.org&key=AAAA";
@@ -153,4 +153,11 @@ test("sheet path summary: idle on the direct route, progress on the tunnel", () 
   assert.equal(pathsSummary({ route: "tunnel", paths, session: false }), "2 of 3 resolver paths working · connecting…");
   assert.equal(pathsSummary({ route: "tunnel", paths, session: true }), "2 of 3 resolver paths working · session up");
   assert.equal(pathsSummary({ resolvers: 5 }), "5 resolvers");
+});
+
+test("DNS interception shows in the report and the sheet", () => {
+  assert.equal(interceptionWarning({ dns_intercepted: false }), "");
+  assert.match(interceptionWarning({ dns_intercepted: true, dns_egress: "114.114.114.114" }), /intercepts DNS \(answered via 114\.114\.114\.114\)/);
+  assert.match(tunnelReport({ dns_intercepted: true, dns_egress: "37.252.230.153", events: [] }), /dns interception: yes, answered via 37\.252\.230\.153/);
+  assert.match(tunnelReport({ dns_intercepted: false, events: [] }), /dns interception: no/);
 });

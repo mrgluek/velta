@@ -45,16 +45,17 @@ const (
 
 // Timeouts and the monitor's hysteresis.
 const (
-	handshakeTimeout   = 30 * time.Second
-	directDialTimeout  = 8 * time.Second
-	tunnelDialTimeout  = 60 * time.Second
-	probeTimeout       = 6 * time.Second
-	minProbeGap        = 10 * time.Second
-	blockedAfter       = 2 // consecutive "relays fail, canary ok" probes before switching to the tunnel
-	recoveredAfter     = 3 // consecutive "a relay answers directly" probes before switching back
-	maxProbedRelays    = 4
-	suspiciousLifetime = 20 * time.Second
-	suspiciousBytes    = 512
+	handshakeTimeout      = 30 * time.Second
+	directDialTimeout     = 8 * time.Second
+	tunnelDialTimeout     = 60 * time.Second
+	probeTimeout          = 6 * time.Second
+	minProbeGap           = 10 * time.Second
+	blockedAfter          = 2 // consecutive "relays fail, canary ok" probes before switching to the tunnel
+	recoveredAfter        = 3 // consecutive "a relay answers directly" probes before switching back
+	maxProbedRelays       = 4
+	suspiciousLifetime    = 20 * time.Second
+	interceptProbeTimeout = 800 * time.Millisecond
+	suspiciousBytes       = 512
 )
 
 type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -82,6 +83,8 @@ type Tunnel struct {
 	routeSince  time.Time
 	routeGen    atomic.Int64 // bumped on every route change, for the shell to nudge the core
 	tunnelFails int          // tunnel dial failures since the route last changed
+	intercepted bool         // this network redirects port-53 traffic (see intercept.go)
+	dnsEgress   string       // who actually resolves for the interceptor, if learned
 	conns       map[*tracked]struct{}
 	relays      map[string]time.Time // relay host -> last seen in a CONNECT
 	relayPorts  map[string]string    // relay host -> TLS port to probe (the one the core used)
@@ -126,6 +129,12 @@ func Start(cfg Config) (*Tunnel, error) {
 	resolvers, skippedPrivate := withoutForeignPrivate(cfg.Effective(), cfg.SystemResolvers)
 	resolvers = ipv4First(resolvers)
 	skipped6 := 0
+	// A network that redirects all port-53 traffic turns every plain-DNS path
+	// into one path through its resolver; DoT gets past it, so lead with it.
+	intercepted := detectInterception(context.Background(), interceptProbeTimeout)
+	if intercepted {
+		resolvers = dotFirst(resolvers)
+	}
 	if !hasIPv6Route() {
 		// Without an IPv6 route these paths can only fail, and soar would
 		// add a TCP sibling to each (seen live: 14 dead paths of 43 on an
@@ -159,6 +168,7 @@ func Start(cfg Config) (*Tunnel, error) {
 	}
 	t.client = client
 	t.resolvers = resolvers
+	t.intercepted = intercepted
 	d := &net.Dialer{Timeout: directDialTimeout}
 	t.dialDirect = d.DialContext
 	t.dialTunnel = client.DialContext
@@ -176,6 +186,10 @@ func Start(cfg Config) (*Tunnel, error) {
 	if skipped6 > 0 {
 		t.log.add("no IPv6 route: skipped %d IPv6 resolvers", skipped6)
 	}
+	if intercepted {
+		t.log.add("this network intercepts DNS (port 53): plain-DNS paths all reach one resolver; DoT paths moved first")
+		go t.learnDNSEgress()
+	}
 	if skippedPrivate > 0 {
 		t.log.add("skipped %d private-address resolvers this network did not hand out", skippedPrivate)
 	}
@@ -190,6 +204,22 @@ func initialRoute(mode string) Route {
 		return RouteTunnel
 	}
 	return RouteDirect
+}
+
+// learnDNSEgress records which resolver really answers on an intercepting
+// network, for the report.
+func (t *Tunnel) learnDNSEgress() {
+	ctx, cancel := context.WithTimeout(t.ctx, 4*time.Second)
+	defer cancel()
+	ip, err := dnsWhoami(ctx, "77.88.8.8:53")
+	if err != nil {
+		t.log.add("DNS interceptor not identified: %v", err)
+		return
+	}
+	t.mu.Lock()
+	t.dnsEgress = ip.String()
+	t.mu.Unlock()
+	t.log.add("DNS queries on this network are answered via %s", ip)
 }
 
 // RouteGen counts route changes. The shell watches it and tells the core to
@@ -695,9 +725,13 @@ type Status struct {
 	Soar       string                `json:"soar"`
 	// Session is whether the soar session with the server is up; Paths is
 	// one row per resolver path (which resolvers carry the tunnel here).
-	Session bool            `json:"session"`
-	Paths   []soar.PathStat `json:"paths"`
-	Events  []Event         `json:"events"`
+	Session bool `json:"session"`
+	// DNSIntercepted: this network redirects port 53; DNSEgress: who
+	// actually resolves for it (whoami.akamai.net), when learned.
+	DNSIntercepted bool            `json:"dns_intercepted"`
+	DNSEgress      string          `json:"dns_egress,omitempty"`
+	Paths          []soar.PathStat `json:"paths"`
+	Events         []Event         `json:"events"`
 }
 
 // Status returns a snapshot with the last n events.
@@ -705,19 +739,21 @@ func (t *Tunnel) Status(n int) Status {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	s := Status{
-		Zone:       t.cfg.Zone,
-		Mode:       t.mode,
-		Route:      t.route.String(),
-		RouteSince: t.routeSince.UTC(),
-		State:      t.state,
-		Resolvers:  len(t.resolvers),
-		Network:    t.cfg.SystemResolvers,
-		Operator:   t.cfg.Operator,
-		LastProbe:  t.lastProbe.UTC(),
-		LastResult: t.lastResult,
-		Active:     map[string]int{"direct": 0, "tunnel": 0},
-		Stats:      map[string]routeStats{"direct": t.routeStatsLocked(RouteDirect), "tunnel": t.routeStatsLocked(RouteTunnel)},
-		Soar:       soarVersion(),
+		Zone:           t.cfg.Zone,
+		Mode:           t.mode,
+		Route:          t.route.String(),
+		RouteSince:     t.routeSince.UTC(),
+		State:          t.state,
+		Resolvers:      len(t.resolvers),
+		Network:        t.cfg.SystemResolvers,
+		DNSIntercepted: t.intercepted,
+		DNSEgress:      t.dnsEgress,
+		Operator:       t.cfg.Operator,
+		LastProbe:      t.lastProbe.UTC(),
+		LastResult:     t.lastResult,
+		Active:         map[string]int{"direct": 0, "tunnel": 0},
+		Stats:          map[string]routeStats{"direct": t.routeStatsLocked(RouteDirect), "tunnel": t.routeStatsLocked(RouteTunnel)},
+		Soar:           soarVersion(),
 	}
 	for h := range t.relays {
 		s.Relays = append(s.Relays, h)
