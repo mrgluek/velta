@@ -9,4 +9,4 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 )
 
-replace github.com/getlantern/soar => github.com/mrgluek/soar v0.1.1-0.20261011202056-d5169b67966c
+replace github.com/getlantern/soar => github.com/mrgluek/soar v0.1.1-0.20261011202921-709f7604610d

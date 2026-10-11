@@ -1,5 +1,5 @@
-github.com/mrgluek/soar v0.1.1-0.20261011202056-d5169b67966c h1:TZC2al3Bm3G2En87o3J03bF9JG83WJfXXAqkHKLzii8=
-github.com/mrgluek/soar v0.1.1-0.20261011202056-d5169b67966c/go.mod h1:6T2+Kbx0GVqYIHqfEaUqlYI5ZRRVZYYhuoMWcxHC+xA=
+github.com/mrgluek/soar v0.1.1-0.20261011202921-709f7604610d h1:jtz/+I8Os1tz8dP19P64g+v0H8rqPDngMZbtW7QI0Fo=
+github.com/mrgluek/soar v0.1.1-0.20261011202921-709f7604610d/go.mod h1:6T2+Kbx0GVqYIHqfEaUqlYI5ZRRVZYYhuoMWcxHC+xA=
 golang.org/x/crypto v0.52.0 h1:RMs7fP2rXdep0CftQlK8Uf+kibLm7qkCcradZWYz988=
 golang.org/x/crypto v0.52.0/go.mod h1:1QgfPxDqh0T2M/elOJtp9RvuR95kVjir0e6/BvEmGbc=
 golang.org/x/sys v0.45.0 h1:dO4czNzziLiiXplLQgBCEpCvXQ3dnkn0SdaZSYdQ+FY=

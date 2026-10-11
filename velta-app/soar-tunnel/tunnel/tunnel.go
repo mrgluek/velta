@@ -137,6 +137,7 @@ func Start(cfg Config) (*Tunnel, error) {
 		SafeQName:     soarSafeQName,
 		MaxPathWindow: soarPathWindow,
 		DialTCP:       dialResolver,
+		StreamOnly:    isDoT, // DoT resolvers get their TCP (TLS) path at once, no doomed UDP probe
 		Logger:        slog.New(&logHandler{log: t.log}),
 	})
 	if err != nil {
@@ -517,6 +518,12 @@ func probeTLS(ctx context.Context, hostport, sni string) error {
 		return err
 	}
 	return c.Close()
+}
+
+// isDoT reports DNS-over-TLS resolvers (port 853): they speak TCP+TLS only.
+func isDoT(resolver string) bool {
+	_, port, err := net.SplitHostPort(resolver)
+	return err == nil && port == "853"
 }
 
 // dialResolver opens soar's TCP paths: TLS for port 853 (DNS-over-TLS uses
