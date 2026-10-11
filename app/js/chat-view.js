@@ -55,7 +55,7 @@ export function setAvatarProfileOpener(fn) { avatarProfileOpener = fn; }
 setVideoLightboxOpener((src, name) => openVideoLightbox(src, name));
 
 import { diagnosticsSink, debugLog } from "./diagnostics.js";
-import { fileUrl, mediaFallbackUrl } from "./media.js";
+import { fileUrl, mediaFallbackUrl, redactMediaUrl } from "./media.js";
 import { openInAppBrowser } from "./inapp-browser.js";
 import { renderMarkdown, extractBotCommands } from "./markdown.js";
 import { compressImage, compressEnabled } from "./image-compress.js";
@@ -1832,7 +1832,7 @@ export class ChatView {
       });
       mediaImg.onerror = () => {
         if (!alive()) return;
-        rustLog(`media img error src=${mediaImg.src} original=${m.filePath}`);
+        rustLog(`media img error src=${redactMediaUrl(mediaImg.src)} original=${m.filePath}`);
         // One-shot swap to the legacy chain (media HTTP server / asset
         // protocol) before giving up.
         const fb = mediaFallbackUrl(m.filePath);
@@ -1855,7 +1855,7 @@ export class ChatView {
       mediaAudio.src = fileUrl(m.filePath);
       mediaAudio.onerror = () => {
         if (!alive()) return;
-        rustLog(`media audio error src=${mediaAudio.src} original=${m.filePath}`);
+        rustLog(`media audio error src=${redactMediaUrl(mediaAudio.src)} original=${m.filePath}`);
         const fb = mediaFallbackUrl(m.filePath);
         if (fb && mediaAudio.dataset.fallback !== "1" && mediaAudio.src !== fb) {
           mediaAudio.dataset.fallback = "1";
