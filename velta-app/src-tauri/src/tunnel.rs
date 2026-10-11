@@ -219,6 +219,7 @@ mod imp {
             let cur = ctx.get_config(Config::ProxyUrl).await.ok().flatten().unwrap_or_default();
             let enabled = ctx.get_config_bool(Config::ProxyEnabled).await.unwrap_or(false);
             let ours = cur.starts_with(OURS);
+            let mut changed = false;
             let result = match &desired {
                 // A proxy the user set up themselves wins over the tunnel.
                 Some(_) if !cur.trim().is_empty() && !ours => Ok(()),
@@ -226,13 +227,16 @@ mod imp {
                     let mut r = Ok(());
                     if &cur != url {
                         r = ctx.set_config(Config::ProxyUrl, Some(url.as_str())).await;
+                        changed = true;
                     }
                     if r.is_ok() && !enabled {
                         r = ctx.set_config(Config::ProxyEnabled, Some("1")).await;
+                        changed = true;
                     }
                     r
                 }
                 None if ours => {
+                    changed = true;
                     let r = ctx.set_config(Config::ProxyUrl, None).await;
                     if r.is_ok() { ctx.set_config(Config::ProxyEnabled, Some("0")).await } else { r }
                 }
@@ -240,6 +244,12 @@ mod imp {
             };
             if let Err(e) = result {
                 crate::log(&format!("dns tunnel: proxy update for account {id} failed: {e}"));
+            } else if changed {
+                // set_config only affects NEW connections: without a restart
+                // the open IMAP/SMTP sessions keep bypassing (or keep using)
+                // the proxy until they drop on their own.
+                crate::log(&format!("dns tunnel: proxy {} for account {id}; restarting its IO", if desired.is_some() { "set" } else { "cleared" }));
+                ctx.restart_io_if_running().await;
             }
         }
     }
