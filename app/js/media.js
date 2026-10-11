@@ -29,7 +29,7 @@ function blobfileBase() {
 //   1. The blobfile:// custom protocol (boot-probed) — serverless, fixed
 //      origin, real 206 ranges answered in lib.rs. The probe is itself an
 //      <img> load, so a positive probe proves the exact pipeline images use.
-//   2. The loopback media HTTP server (fixed port 20810, per-launch token,
+//   2. The loopback media HTTP server (ephemeral port, per-launch token,
 //      real ranges) — the probe-negative path, and the per-element fallback
 //      for <video>/<audio>: WebView2's media stack bypasses custom-protocol
 //      interception even when images through the same scheme work.
@@ -62,7 +62,7 @@ export function fileUrl(path, opts = {}) {
     if (base) {
       const q = opts.thumb ? "?w=720" : "";
       const url = `${base}/${encodeURIComponent(resolved)}${q}`;
-      debugLog(`fileUrl path=${path} url=${url} (media server)`);
+      debugLog(`fileUrl path=${path} url=${redactMediaUrl(url)} (media server)`);
       return url;
     }
     const tauri = window.__TAURI__;
@@ -82,6 +82,12 @@ export function fileUrl(path, opts = {}) {
     }
   } catch (e) { rustLog(`fileUrl error: ${e}`); }
   return path;
+}
+
+// The media server's per-launch token is the only thing keeping other local
+// processes out of the account files: keep it out of logs that users share.
+export function redactMediaUrl(url) {
+  return String(url ?? "").replace(/(http:\/\/127\.0\.0\.1:\d+\/)[0-9a-f]{16,}(?=\/|$)/gi, "$1<token>");
 }
 
 function wasmBlobs() {

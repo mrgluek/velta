@@ -1041,6 +1041,27 @@ static APP_JAVA_VM: Mutex<Option<jni::JavaVM>> = Mutex::new(None);
 // HTTP server with Range support works on every platform and every WebView.
 static MEDIA_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 static MEDIA_TOKEN: Mutex<String> = Mutex::new(String::new());
+static MEDIA_CONNECTIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+const MEDIA_MAX_CONNECTIONS: usize = 64;
+
+/// Releases a media-server connection slot when the serving thread ends,
+/// panics included.
+struct MediaConnectionSlot;
+
+impl Drop for MediaConnectionSlot {
+    fn drop(&mut self) {
+        MEDIA_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+/// Compares the URL token with the server's without an early exit, so the
+/// response time does not reveal how much of a guessed token matched.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
 
 #[tauri::command]
 fn media_base_url() -> String {
@@ -1695,21 +1716,17 @@ fn start_media_server(accounts: PathBuf) {
     std::thread::Builder::new()
         .name("media-http".into())
         .spawn(move || {
-            // Prefer the fixed port: the static CSP whitelist references it.
-            // Fall back to an ephemeral port (media may then be CSP-blocked --
-            // logged loudly) rather than losing media entirely.
-            let listener = match std::net::TcpListener::bind("127.0.0.1:20810") {
+            // An ephemeral port, never a fixed one: two Velta builds on one
+            // device (e.g. a fork installed next to the store app) used to
+            // race for 20810, and the loser's media URLs were CSP-blocked.
+            // The CSP allows http://127.0.0.1:* for this reason; the
+            // per-launch token below is what keeps other local processes out.
+            let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
                 Ok(l) => l,
-                Err(_) => match std::net::TcpListener::bind("127.0.0.1:0") {
-                    Ok(l) => {
-                        log("media http: port 20810 busy, bound ephemeral -- media-src CSP mismatch possible");
-                        l
-                    }
-                    Err(e) => {
-                        log(&format!("media server bind failed: {e}"));
-                        return;
-                    }
-                },
+                Err(e) => {
+                    log(&format!("media server bind failed: {e}"));
+                    return;
+                }
             };
             let port = match listener.local_addr() {
                 Ok(a) => a.port(),
@@ -1719,8 +1736,17 @@ fn start_media_server(accounts: PathBuf) {
             log(&format!("media http server on 127.0.0.1:{port}"));
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
+                // Any local process can connect to a loopback port: cap the
+                // thread-per-connection fan-out so one can't exhaust threads.
+                // The WebView needs a handful (images + a few media ranges).
+                if MEDIA_CONNECTIONS.fetch_add(1, std::sync::atomic::Ordering::AcqRel) >= MEDIA_MAX_CONNECTIONS {
+                    MEDIA_CONNECTIONS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+                    eprintln!("[media] connection limit reached; dropping one");
+                    continue;
+                }
                 let accounts = accounts.clone();
                 std::thread::spawn(move || {
+                    let _slot = MediaConnectionSlot;
                     // Connection-level diagnostics reach logcat via stderr.
                     let peer = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "?".into());
                     eprintln!("[media] accept from {peer}");
@@ -1814,7 +1840,7 @@ fn serve_media_connection(stream: &mut std::net::TcpStream, accounts: &PathBuf) 
         Some((p, q)) => (p, Some(q.to_string())),
         None => (enc_path, None),
     };
-    if url_token != token {
+    if !constant_time_eq(url_token.as_bytes(), token.as_bytes()) {
         eprintln!("[media] 404: token mismatch");
         return not_found();
     }
@@ -3752,6 +3778,15 @@ pub fn run() {
 mod media_tests {
     use super::*;
     use std::io::{Read as _, Write as _};
+
+    #[test]
+    fn media_token_compare_is_exact() {
+        assert!(constant_time_eq(b"abc123", b"abc123"));
+        assert!(!constant_time_eq(b"abc123", b"abc124"));
+        assert!(!constant_time_eq(b"abc123", b"abc12"));
+        assert!(!constant_time_eq(b"", b"x"));
+        assert!(constant_time_eq(b"", b""));
+    }
 
     fn temp_media_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("velta-media-test-{tag}-{}", std::process::id()));

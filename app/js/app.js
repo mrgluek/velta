@@ -3,7 +3,7 @@ import { createCore } from "./transport.js";
 import "./components.js";
 import { escapeHtml, escapeAttr } from "./components.js";
 import { chatCategoryOf, swipeCategoryStep, batteryReactionPlan } from "./rpc-core.js";
-import { fileUrl, setWasmBlobReader } from "./media.js";
+import { fileUrl, setWasmBlobReader, redactMediaUrl } from "./media.js";
 import { buildAvatarSvg, setFingerprintSource, fingerprintFor, fingerprintGroups } from "./avatar.js";
 import { ChatView, setAvatarProfileOpener } from "./chat-view.js";
 import { initCalls } from "./calls.js";
@@ -5259,7 +5259,7 @@ async function boot() {
       const tauri = window.__TAURI__;
       const mediaInvoke = tauri?.core?.invoke || tauri?.invoke;
       if (mediaInvoke) window.veltaMediaBase = await mediaInvoke("media_base_url");
-      appLog(`media base: ${window.veltaMediaBase}`);
+      appLog(`media base: ${redactMediaUrl(window.veltaMediaBase)}`);
     } catch (e) {
       appLog(`media base unavailable: ${e?.message || e}`);
     }
