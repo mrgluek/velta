@@ -1,0 +1,4 @@
+# macOS plists: codesign's AMFI parser rejects the LF-converted bytes
+# (AMFIUnserializeXML syntax error — v1.4.65 release failure). Keep the
+# checked-in bytes verbatim, never EOL-normalize these.
+*.plist -text
