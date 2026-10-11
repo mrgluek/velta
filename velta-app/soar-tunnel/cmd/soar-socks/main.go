@@ -38,7 +38,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "soar-socks:", err)
 		os.Exit(1)
 	}
-	fmt.Fprintf(os.Stderr, "SOCKS5 on %s, mode %s, %d resolvers\n", t.Addr(), cfg.Mode, len(cfg.Resolvers))
+	fmt.Fprintf(os.Stderr, "SOCKS5 on %s, mode %s, %d resolvers (%d from the link)\n", t.Addr(), cfg.Mode, len(cfg.Effective()), len(cfg.Resolvers))
 
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
