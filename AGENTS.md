@@ -2439,7 +2439,10 @@ do-not-regress rules; dates mark when the lesson was learned.
   "Download" tag link; rides a workflow artifact to the notify
   job, which posts it to `ntfy.gluek.info/velta_changelog`). Hand-written
   highlights or thanks for a tag go in `.github/release-notes/<tag>.md`
-  (optional); both texts print it above the commit list. The keystore
+  (optional); both texts print it above the commit list. The commit range
+  starts at the newest earlier tag that HAS a published GitHub release
+  (`gh release view`), so a tag whose run failed (v1.4.66: Windows/macOS
+  dead-code error) is skipped and its changes land in the next notes. The keystore
   lives in `signing/`
   (gitignored) and the four `ANDROID_KEY*` repo secrets — losing both
   means installed APKs can never be updated again.

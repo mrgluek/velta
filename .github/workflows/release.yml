@@ -59,9 +59,20 @@ jobs:
           fi
 
       - name: Build changelog since the previous tag
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ steps.tag.outputs.name }}"
-          PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
+          # Previous tag WITH a published release: a tag whose run failed
+          # (v1.4.66) never shipped, so its changes belong in the next notes.
+          PREV=""
+          for t in $(git tag --merged "$TAG^" --sort=-v:refname 'v*'); do
+            if gh release view "$t" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              PREV="$t"
+              break
+            fi
+          done
+          [ -n "$PREV" ] || PREV=$(git describe --tags --abbrev=0 "$TAG^" 2>/dev/null || true)
           # Release-notes entries: user-facing conventional commits only —
           # chore/docs/ci/test/style/build are skipped. Each entry renders as
           # "- type(scope): \n<subject> (<short-sha>)" with a blank line
