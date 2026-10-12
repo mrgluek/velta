@@ -1883,7 +1883,32 @@ export class JsonRpcCore extends EventTarget {
   // it. The call blocks server-side for the whole transfer — don't await it
   // in a timeout-sensitive path; completion arrives via ImexProgress.
   async provideBackup() {
-    return this._call("provide_backup", this.accountId);
+    return this._withoutTunnelProxy(() => this._call("provide_backup", this.accountId));
+  }
+
+  // DNS tunnel: this device's tunnel proxy is a 127.0.0.1 port
+  // that exists only here. Keep it out of backups and second-device
+  // transfers, or the restored profile (in any Velta) can't reach its
+  // relays. No-op where the shell has no tunnel commands.
+  async _withoutTunnelProxy(run) {
+    const invoke = globalThis.window?.__TAURI__?.core?.invoke;
+    const accountId = this.accountId;
+    let detached = false;
+    if (invoke) {
+      try { await invoke("tunnel_backup_begin", { accountId }); detached = true; } catch { /* no tunnel support */ }
+    }
+    try {
+      return await run();
+    } finally {
+      if (detached) invoke("tunnel_backup_end", { accountId }).catch(() => {});
+    }
+  }
+
+  // After a restore or a received transfer: let the shell fix the new
+  // profile's proxy now (a stale tunnel proxy from the source device would
+  // otherwise block its mail until the shell's next periodic pass).
+  _tunnelReapply() {
+    globalThis.window?.__TAURI__?.core?.invoke?.("tunnel_reapply").catch(() => {});
   }
 
   // QR text for a running provideBackup(). Blocks on the backend until the
@@ -1903,7 +1928,7 @@ export class JsonRpcCore extends EventTarget {
   // contacts and keys into <destination>/<file>.tar. Progress rides
   // "imex-progress" (0..1000).
   async exportBackup(destination, passphrase = null) {
-    await this._callWithTimeout(180000, "export_backup", this.accountId, destination, passphrase);
+    await this._withoutTunnelProxy(() => this._callWithTimeout(180000, "export_backup", this.accountId, destination, passphrase));
   }
 
   // New device: receive a profile from another device's backup QR. Imports
@@ -1923,7 +1948,7 @@ export class JsonRpcCore extends EventTarget {
         await this._call("select_account", targetId);
         this.accountId = targetId;
       }
-      this._call("get_backup", targetId, qrContent).catch(() => {});
+      this._call("get_backup", targetId, qrContent).then(() => this._tunnelReapply()).catch(() => {});
       failed = false;
       return targetId;
     } catch (err) {
@@ -1940,7 +1965,9 @@ export class JsonRpcCore extends EventTarget {
   // account. Fire-and-forget on the wire — the import can take minutes;
   // track it via imex-progress events (1000 = done, 0 = failed).
   async importBackup(path) {
-    return this._call("import_backup", this.accountId, path, null);
+    const res = await this._call("import_backup", this.accountId, path, null);
+    this._tunnelReapply();
+    return res;
   }
 
   // Cancels the current account's ongoing process (backup provide/receive).

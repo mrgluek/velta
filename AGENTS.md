@@ -104,6 +104,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   └── deny.toml             # cargo-deny policy
 │
 ├── velta-app/            # Tauri v2 wrapper
+│   ├── soar-tunnel/          # optional DNS tunnel: Go c-shared lib + soar-socks CLI (docs/agents/dns-tunnel.md)
 │   └── src-tauri/
 │       ├── Cargo.toml        # depends on deltachat-jsonrpc (path on Android)
 │       ├── tauri.conf.json   # frontendDist: ../../app (version mirrors Cargo.toml — Android reads only it)
@@ -112,6 +113,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │       ├── src/
 │       │   ├── lib.rs        # Windows sidecar bridge + Android in-process core
 │       │   ├── p2p.rs        # Local chat engine: iroh (relay-less) QUIC pairing + 1:1 chat
+│       │   ├── tunnel.rs     # Optional DNS tunnel (Android): loads libsoartunnel.so, keeps proxy_url
 │       │   ├── bin/          # p2p-hub.rs — headless terminal hub (debug helper)
 │       │   └── main.rs       # Tauri entry point
 │       └── build.rs
@@ -2246,7 +2248,7 @@ talks to Google.
 ## 11. Notes for agents (operational rules)
 
 Per-subsystem narratives live in `docs/agents/*.md` (webxdc, relays,
-onboarding, p2p/local chat, android-shell, media, read-receipts) — read the
+onboarding, p2p/local chat, android-shell, media, read-receipts, dns-tunnel) — read the
 relevant one before touching that subsystem. The entries below are cross-cutting
 do-not-regress rules; dates mark when the lesson was learned.
 

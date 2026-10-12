@@ -118,6 +118,15 @@
                 <data android:scheme="dcbackup" />
                 <data android:scheme="openpgp4fpr" />
             </intent-filter>
+            <!-- DNS tunnel setup links: velta://tunnel?v=1&zone=…&key=…
+                 (tunnel.rs). The app asks before applying one. Only the
+                 tunnel host is claimed; velta://chat stays internal. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="velta" android:host="tunnel" />
+            </intent-filter>
 
             <!-- #97: show Velta in the system share sheet. One mime per data
                  tag is OR. tao already turns SEND into RunEvent::Opened. -->

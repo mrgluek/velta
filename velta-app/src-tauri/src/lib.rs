@@ -19,6 +19,7 @@ use tauri::{Emitter, Manager, State};
 
 // Public so the p2p-hub debug example can drive the engine headlessly.
 pub mod p2p;
+mod tunnel;
 
 static LOG_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 // OS opens waiting for the page: invite links, notification taps, and
@@ -1974,6 +1975,8 @@ static APP_NOTIFICATIONS_CLASS: Mutex<Option<jni::objects::GlobalRef>> = Mutex::
 // classloader reason: the commands run on a Rust worker thread.
 #[cfg(target_os = "android")]
 static APP_BATTERY_CLASS: Mutex<Option<jni::objects::GlobalRef>> = Mutex::new(None);
+#[cfg(target_os = "android")]
+static APP_NETINFO_CLASS: Mutex<Option<jni::objects::GlobalRef>> = Mutex::new(None);
 
 // org.velta.UpdateInstall — #60: hands a downloaded APK to the system
 // package installer. Cached for the same classloader reason as above.
@@ -2052,6 +2055,16 @@ pub extern "system" fn Java_org_velta_MainActivity_setApplicationContext(
             Err(e) => log(&format!("setApplicationContext: Battery global ref failed: {e}")),
         },
         Err(e) => log(&format!("setApplicationContext: Battery find_class failed: {e}")),
+    }
+    // DNS tunnel (tunnel.rs): operator-assigned resolvers + SIM operator.
+    match env.find_class("org/velta/NetInfo") {
+        Ok(class) => match env.new_global_ref(&class) {
+            Ok(g) => {
+                *APP_NETINFO_CLASS.lock().unwrap() = Some(g);
+            }
+            Err(e) => log(&format!("setApplicationContext: NetInfo global ref failed: {e}")),
+        },
+        Err(e) => log(&format!("setApplicationContext: NetInfo find_class failed: {e}")),
     }
     match env.find_class("org/velta/UpdateInstall") {
         Ok(class) => match env.new_global_ref(&class) {
@@ -2689,7 +2702,12 @@ fn log_opened(url: &str) {
     if url.starts_with("data:") || url.starts_with("content:") || url.starts_with("file:") || Path::new(url).is_file() {
         log("opened share payload");
     } else {
-        log(&format!("deeplink opened: {}", redact_chat_link(url)));
+        // A tunnel link names the private tunnel server: never write it to the log.
+        if url.to_ascii_lowercase().starts_with("velta://tunnel") {
+            log("deeplink opened: velta://tunnel?…");
+        } else {
+            log(&format!("deeplink opened: {}", redact_chat_link(url)));
+        }
     }
 }
 
@@ -3718,6 +3736,8 @@ pub fn run() {
                             start_bg_fetch_kicker(bg_handle, tx.clone());
                             *tx_holder.lock().unwrap() = Some(tx);
                             set_sidecar_status(&status_handle, serde_json::json!({"running": true, "stage": "ready"}));
+                            // Optional DNS tunnel: a no-op unless a velta://tunnel link was accepted.
+                            tunnel::boot(&status_handle);
                         }
                         Err(e) => {
                             log(&format!("embedded Android core initialization failed: {e}"));
@@ -3847,7 +3867,7 @@ pub fn run() {
                 responder.respond(response);
             });
         })
-        .invoke_handler(tauri::generate_handler![js_log, rpc, set_ui_visible, get_event_reader_mode, events_listener_ready, battery_optimization_exempt, request_battery_exemption, get_latest_version, download_update, fetch_page_title, expand_invite_link, fetch_link_preview, probe_relay, allow_picked_path, webxdc_begin, set_notify_prefs, get_notify_prefs, set_logging_enabled, set_devtools, open_in_app_browser, open_webview_browser, get_initial_deeplink, take_opened_urls, chat_link_token, get_sidecar_status, get_accounts_dir, resolve_upload_path, resolve_content_uri, prep_backup, backup_scratch_dir, publish_backup, media_base_url, poster_cache_path, read_media_bytes, write_poster, notify_incoming, install_update, get_battery_status, share_text, p2p::p2p_status, p2p::p2p_set_enabled, p2p::p2p_set_name, p2p::p2p_create_invite, p2p::p2p_accept_invite, p2p::p2p_send, p2p::p2p_send_file, p2p::p2p_remove_peer, p2p::p2p_messages, p2p::p2p_retry, p2p::p2p_pair_nearby, p2p::p2p_approve_pair, p2p::p2p_groups, p2p::p2p_group_create, p2p::p2p_group_add, p2p::p2p_group_remove, p2p::p2p_group_rename, p2p::p2p_group_disband, p2p::p2p_group_leave, p2p::p2p_group_delete, p2p::p2p_peer_groups, p2p::p2p_typing, p2p::p2p_group_send, p2p::p2p_group_send_file, p2p::p2p_group_file_retry, p2p::p2p_group_messages]);
+        .invoke_handler(tauri::generate_handler![js_log, rpc, set_ui_visible, get_event_reader_mode, events_listener_ready, battery_optimization_exempt, request_battery_exemption, get_latest_version, download_update, fetch_page_title, expand_invite_link, fetch_link_preview, probe_relay, allow_picked_path, webxdc_begin, set_notify_prefs, get_notify_prefs, set_logging_enabled, set_devtools, open_in_app_browser, open_webview_browser, get_initial_deeplink, take_opened_urls, chat_link_token, get_sidecar_status, get_accounts_dir, resolve_upload_path, resolve_content_uri, prep_backup, backup_scratch_dir, publish_backup, media_base_url, poster_cache_path, read_media_bytes, write_poster, notify_incoming, install_update, get_battery_status, share_text, tunnel::tunnel_preview, tunnel::tunnel_install, tunnel::tunnel_remove, tunnel::tunnel_status, tunnel::tunnel_set_mode, tunnel::tunnel_network_changed, tunnel::tunnel_backup_begin, tunnel::tunnel_backup_end, tunnel::tunnel_reapply, p2p::p2p_status, p2p::p2p_set_enabled, p2p::p2p_set_name, p2p::p2p_create_invite, p2p::p2p_accept_invite, p2p::p2p_send, p2p::p2p_send_file, p2p::p2p_remove_peer, p2p::p2p_messages, p2p::p2p_retry, p2p::p2p_pair_nearby, p2p::p2p_approve_pair, p2p::p2p_groups, p2p::p2p_group_create, p2p::p2p_group_add, p2p::p2p_group_remove, p2p::p2p_group_rename, p2p::p2p_group_disband, p2p::p2p_group_leave, p2p::p2p_group_delete, p2p::p2p_peer_groups, p2p::p2p_typing, p2p::p2p_group_send, p2p::p2p_group_send_file, p2p::p2p_group_file_retry, p2p::p2p_group_messages]);
 
     builder = builder.plugin(tauri_plugin_notification::init());
 
