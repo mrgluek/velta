@@ -312,10 +312,11 @@ progress.chat-load-bar::-moz-progress-bar { background: transparent; }
 .pinned-bar .pb-text b { color: var(--text); font-weight: 600; }
 
 /* ---------- Pin tray (details element, issue: multi-pin + unpin) ---------- */
+/* Same surface as the chat header. The old #14141c fallback hid light-theme names. */
 .pin-tray {
-  width: 100%; background: var(--bg-elev, #14141c);
-  border-bottom: 1px solid rgba(128, 128, 128, .18);
-  color: var(--text-dim, #9a9aa8); font: inherit; font-size: 13px;
+  width: 100%; background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim); font: inherit; font-size: 13px;
 }
 .pin-tray > summary {
   display: flex; align-items: center; gap: 8px;
@@ -336,7 +337,7 @@ progress.chat-load-bar::-moz-progress-bar { background: transparent; }
 .pin-tray-list {
   display: flex; flex-direction: column;
   max-height: 40vh; overflow-y: auto;
-  border-top: 1px solid rgba(128, 128, 128, .14);
+  border-top: 1px solid var(--border);
 }
 .pin-tray-item {
   display: flex; align-items: center; gap: 8px;
