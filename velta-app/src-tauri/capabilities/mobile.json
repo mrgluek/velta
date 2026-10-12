@@ -18,6 +18,7 @@
       ]
     },
     "dialog:allow-open",
+    "dialog:allow-save",
     "fs:default",
     "fs:allow-read-file",
     "fs:allow-write-file",

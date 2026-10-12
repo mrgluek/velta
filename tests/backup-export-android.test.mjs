@@ -34,3 +34,9 @@ test("desktop backup export uses the folder picker + core export, never publish_
   assert.match(handler.slice(desktop), /^\} else \{\s*await core\.exportBackup\(dest, pass \|\| null\);/);
   assert.match(app, /tauriInvoke\("plugin:dialog\|open", \{ options: \{ directory: true/);
 });
+
+test("Android capability grants the save dialog the backup export calls", () => {
+  const mobile = JSON.parse(readFileSync(new URL("../velta-app/src-tauri/capabilities/mobile.json", import.meta.url), "utf8"));
+  const perms = mobile.permissions.map(p => (typeof p === "string" ? p : p.identifier));
+  assert.ok(perms.includes("dialog:allow-save") || perms.includes("dialog:default"), "dialog save permitted on Android");
+});
