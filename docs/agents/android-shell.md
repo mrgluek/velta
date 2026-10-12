@@ -208,7 +208,7 @@ Notification taps use the same queue (Android `Opened`, Windows toast
 text. `content://`, `file://`, a Windows path, a UNC path, or an absolute
 `/` path is a file. `velta://`, `dcaccount:`, `dclogin:`, `dcbackup:` and `openpgp4fpr:` are
 not shares. `handleDeeplinkFromUrl` returns true when it consumed a chat,
-backup, or invite link (a chat link with a bad token still counts); other
+tunnel, backup, or invite link (a chat link with a bad token still counts); other
 https, and any other scheme tao passed through because the text parsed as a
 URL ("Re: x"), becomes share text.
 

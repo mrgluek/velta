@@ -75,6 +75,12 @@ jobs:
                 printf "- %s: \n%s (%s)\n\n", type, $2, $1
               }'
           }
+          # Optional hand-written notes for this tag (highlights, thanks):
+          # .github/release-notes/<tag>.md is printed above the commit list.
+          extra_notes() {
+            NOTES=".github/release-notes/$TAG.md"
+            if [ -f "$NOTES" ]; then cat "$NOTES"; echo; fi
+          }
           if [ -n "$PREV" ]; then
             echo "Range: $PREV..$TAG"
             {
@@ -82,11 +88,13 @@ jobs:
               echo
               echo "Full changelog: https://github.com/pbuzdin/velta/compare/$PREV...$TAG"
               echo
+              extra_notes
               list_commits "$PREV..$TAG"
             } > changelog.md
             {
               echo "What's changed in Velta $TAG"
               echo
+              extra_notes
               list_commits "$PREV..$TAG"
               echo "Download: https://github.com/pbuzdin/velta/releases/tag/$TAG"
             } > announce.md
@@ -95,11 +103,13 @@ jobs:
             {
               echo "## What's changed in Velta $TAG"
               echo
+              extra_notes
               list_commits "$TAG"
             } > changelog.md
             {
               echo "What's changed in Velta $TAG"
               echo
+              extra_notes
               list_commits "$TAG"
               echo "Download: https://github.com/pbuzdin/velta/releases/tag/$TAG"
             } > announce.md

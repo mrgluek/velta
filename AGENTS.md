@@ -1831,7 +1831,7 @@ next push or the tainted commits come back.
 ### 7.2 Frontend
 
 Regression suites (Node's built-in test runner, no dependencies). Run the
-whole set — 58 files, 466 tests as of 2026-10-11:
+whole set — 63 files, 487 tests as of 2026-10-12:
 
 ```bash
 node --test tests/
@@ -2437,7 +2437,9 @@ do-not-regress rules; dates mark when the lesson was learned.
   conventional commits only — feat/fix/perf/refactor/revert; the rest are
   skipped) and `announce.md` (same minus the compare link, plus a
   "Download" tag link; rides a workflow artifact to the notify
-  job, which posts it to `ntfy.gluek.info/velta_changelog`). The keystore
+  job, which posts it to `ntfy.gluek.info/velta_changelog`). Hand-written
+  highlights or thanks for a tag go in `.github/release-notes/<tag>.md`
+  (optional); both texts print it above the commit list. The keystore
   lives in `signing/`
   (gitignored) and the four `ANDROID_KEY*` repo secrets — losing both
   means installed APKs can never be updated again.
@@ -2544,7 +2546,9 @@ do-not-regress rules; dates mark when the lesson was learned.
   and do not add the Proxies drawer that issue asked for. The core is the
   database and the message model. `core/src/transport.rs` is one IMAP/SMTP
   relay, not a plugin slot. Local chat wraps the booted core and does not
-  replace it. A profile with no relay is the welcome splash's "Enter local
+  replace it. The opt-in Android DNS tunnel (#116/#119) is not a Proxies
+  drawer either: it reuses that one `proxy_url` and never overrides a
+  proxy the user set (docs/agents/dns-tunnel.md). A profile with no relay is the welcome splash's "Enter local
   chat…". Detail: docs/agents/relays.md, docs/agents/p2p.md.
 - **Encoding (2026-09-23)** — every text file is UTF-8 without BOM; no
   exceptions. On this Windows checkout the ANSI codepage is CP1251

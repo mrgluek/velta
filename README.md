@@ -362,7 +362,8 @@ profiles around).
   passphrase (min 6 chars). The profile stays signed in; import via the
   restore option on the splash. In the browser PWA there is no folder
   picker — the backup downloads straight from the page as
-  `velta-backup-<addr>-<date>.tar`.
+  `velta-backup-<addr>-<date>.tar`. On Android a system save dialog asks
+  where to put the `.tar`, so a file manager can reach it.
 - **Delete profile** — permanently removes the profile you are in: the
   account, its keys, the message database and all blobs on this device.
   Velta asks you to type the profile's address to confirm, suggests writing
@@ -428,6 +429,39 @@ Full
 domain, status and
 quota sit in each chip's tooltip.
 
+**Multi-device** (drawer switch) copies the messages you send to your other
+devices and syncs state between them. It reads and writes the core's
+`bcc_self` setting directly (off by default), so it always shows what the
+profile really uses.
+
+</details>
+
+<details>
+<summary>DNS tunnel (Android, opt-in)</summary>
+
+Some mobile networks only let allowlisted sites through, which blocks the
+chatmail relays. On Android, Velta can then reach them over a
+[soar](https://github.com/getlantern/soar) DNS tunnel. It is **off by
+default**. Nothing runs until you open a `velta://tunnel?v=1&zone=…&key=…`
+setup link and confirm it. The link names a tunnel server, and that server
+can see which relays you connect to and when, so only accept links from
+someone you trust. Velta itself ships no tunnel server.
+
+Once a link is accepted, the drawer shows a **DNS tunnel** row. It opens a
+sheet with the current route and these modes:
+
+- **Automatic** (default): connect directly while the relays answer, and use
+  the tunnel only when nothing but allowlisted sites works.
+- **Always**: every connection goes through the tunnel.
+- **Off**: never use the tunnel.
+
+The sheet also has diagnostics you can share and a button to remove the
+tunnel. The tunnel runs as a local SOCKS5 proxy set as each profile's
+`proxy_url`. A proxy you configured yourself always wins over it. Backups and
+second-device transfers leave the tunnel proxy out. Contributed by
+[@mrgluek](https://github.com/mrgluek) (#116, #119). Details:
+[`docs/agents/dns-tunnel.md`](docs/agents/dns-tunnel.md).
+
 </details>
 
 <details>
@@ -445,6 +479,7 @@ Velta can open invite and account-setup links directly instead of making the use
 | Android / PWA | `dcaccount:https://nine.testrun.org/new` | Opens a chooser: add the relay to the current profile, or create a new chatmail account. Velta is registered for the raw `dcaccount:` scheme on Android (system chooser if other chat apps also handle it). |
 | Android | `dclogin:…` | Chooser: add the (existing) relay account to the current profile. |
 | Android | `DCBACKUP2:…` (second-device code) | Opens Velta's "Receive a profile" transfer flow directly. |
+| Android | `velta://tunnel?v=1&zone=…&key=…` (DNS tunnel setup) | Asks for confirmation, then sets up the optional DNS tunnel (see "DNS tunnel"). |
 | Desktop (Windows/Linux) | `velta://invite?url=<encoded i.delta.chat URL>` | Opens Velta and joins the 1:1 or group chat. |
 | Desktop (Windows/Linux) | `velta://account?url=<encoded dcaccount URL>` | Opens Velta and offers the relay/new-profile chooser. |
 
@@ -1052,8 +1087,9 @@ Velta ships **zero analytics, telemetry, or crash reporting** — verified
 against the codebase: the frontend's only network calls go to loopback helper
 services on your own device, and the Delta Chat core talks exclusively to the
 chatmail relays you configure (that is the messaging itself; calls use the
-relays' STUN/TURN when needed). There is no update-check, no usage tracking,
-and no crash uploader. One installer-level exception: on Windows, a machine
+relays' STUN/TURN when needed). If you opt into the Android DNS tunnel, that
+traffic goes through the tunnel server named in the link you accepted.
+There is no update-check, no usage tracking, and no crash uploader. One installer-level exception: on Windows, a machine
 missing the WebView2 runtime fetches it via Tauri's install bootstrap — that
 is the installer, not the app, and it sends nothing about you.
 
@@ -1123,6 +1159,7 @@ by value with their integration notes — lives in
 .
 ├── app/                        # Velta web frontend (vanilla JS, no build)
 ├── velta-app/              # Tauri 2 wrapper for Windows + Android
+│   ├── soar-tunnel/            # optional Android DNS tunnel (Go c-shared lib)
 │   └── src-tauri/
 │       ├── Cargo.toml          # Rust crate + deltachat-jsonrpc dependency
 │       ├── tauri.conf.json     # shared Tauri config
@@ -1132,6 +1169,7 @@ by value with their integration notes — lives in
 │       └── src/
 │           ├── lib.rs          # sidecar + Android in-process core glue
 │           ├── p2p.rs          # local chat engine (iroh QUIC pairing + 1:1 chat)
+│           ├── tunnel.rs       # optional DNS tunnel: loads libsoartunnel.so (Android)
 │           ├── bin/p2p-hub.rs  # headless terminal hub (debug helper)
 │           └── main.rs         # Tauri entry point
 ├── velta-core-service/         # Android background-service (JNI + WS bridge) APK
@@ -1159,6 +1197,7 @@ is hand-rolled for Velta.
 | [virtual-scroller](https://github.com/catamphetamine/virtual-scroller) (`virtual-scroller-dom`) | Windowed rendering of the message history with variable-height rows, seamless prepends and scroll restoration | [catamphetamine/virtual-scroller](https://github.com/catamphetamine/virtual-scroller) |
 | [Tauri 2](https://github.com/tauri-apps/tauri) | Desktop/Android shell, deep links, sidecar process | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 | [Delta Chat core 2.63.0](https://github.com/chatmail/core) | The messaging engine (Rust): contacts, chats, e2e crypto, IMAP/SMTP | [chatmail/core](https://github.com/chatmail/core) |
+| [soar](https://github.com/getlantern/soar) (Go, via the `mrgluek/soar` fork) | Optional Android DNS tunnel, built by CI into `libsoartunnel.so` | [getlantern/soar](https://github.com/getlantern/soar) |
 
 Both JS libraries are vendored under `app/vendor/` (no bundler, no `node_modules`
 at runtime). UI icons are individual SVGs from [SVG Repo](https://www.svgrepo.com/).
@@ -1199,6 +1238,9 @@ cargo install tauri-cli --version "^2.0" --locked
 - JDK 17
 - Targets installed via rustup:
   `aarch64-linux-android`, `armv7-linux-androideabi`, `i686-linux-androideabi`, `x86_64-linux-android`
+- Optional: Go 1.25+ for the DNS tunnel library (`velta-app/soar-tunnel`).
+  CI builds `libsoartunnel.so` into `gen/android/app/src/main/soarLibs/`;
+  an APK built without it runs normally, just without the tunnel.
 
 #### WSL-only NDK note
 
