@@ -883,7 +883,10 @@ hands the file to the system installer over Velta, no browser detour — see
 <summary>Deleting messages</summary>
 
 Deleting a message (long-press / right-click → Delete) opens the same dialog as
-official Delta Chat desktop. **Right-click a chat in the chat list → Delete
+official Delta Chat desktop. After you confirm, the bubble stays put and shows
+"This message was deleted" with Undo. A bar along the bottom of Undo runs for
+10 seconds; when it finishes, the message is deleted and the row leaves.
+Undo puts the original bubble back. **Right-click a chat in the chat list → Delete
 old messages…** bulk-deletes a whole chat's history older than a chosen age
 (1 hour / 1 day / 1 week / 5 weeks / 6 months / 1 year); pinned messages are
 kept. The same cleanup lives in the chat info sheet under **Old

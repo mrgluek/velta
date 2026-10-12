@@ -434,9 +434,10 @@ test("stale context and reaction callbacks cannot act on identical IDs", async t
   await view.open(7);
   core.starMessages = core.addReaction = core.deleteMessages = () => assert.fail("stale menu dispatched RPC");
   view._msgContextMenu(view.msgIndex.get(10), 20, 20);
-  const actions = [...node("popups").querySelector(".ctx-menu").children];
+  const actions = [...node("popups").querySelector(".ctx-menu").querySelectorAll("button")]
+    .filter(b => !b.className.includes("msg-react-more"));
   view._reactionMenu(view.msgIndex.get(10), 20, 20);
-  const reaction = node("popups").querySelector(".ctx-menu").children[0];
+  const reaction = node("popups").querySelector(".ctx-menu").querySelector("button");
   switchTo("B");
   await view.open(7);
   for (const action of actions) await action.fire("click");
@@ -458,6 +459,7 @@ test("delete confirmation is cancelled on switch; in-flight delete cannot clear 
   await cancelled;
   assert.equal(deleted, 0);
   await view.open(7);
+  view.deleteUndoMs = 0; // the hold commits on the next tick; the test must not wait 10s
   const deleting = view._delete([10]);
   const button = node("popups").querySelectorAll("button").find(b => b.textContent === "Delete for me");
   await button.fire("click");

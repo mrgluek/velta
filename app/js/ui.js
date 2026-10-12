@@ -5,6 +5,7 @@ import { fileUrl } from "./media.js";
 import { linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_LABELS, LINK_PREVIEW_IP_WARNING } from "./link-preview.js";
 import { trackingStripEnabled, setTrackingStripEnabled } from "./trackers.js";
 import { APP_VERSION } from "./version.gen.js";
+import { searchEmoji } from "./emoji.js";
 
 const popups = () => document.getElementById("popups");
 
@@ -90,6 +91,120 @@ export function showContextMenu(items, x, y) {
   overlay.addEventListener("contextmenu", e => { e.preventDefault(); closeAllPopups(); });
   popups().append(overlay, menu);
   placeMenu(menu, x, y);
+  return menu;
+}
+
+// Consecutive items that share `pair` sit on one row (at most two).
+// A danger item is its own full-width row. "-" is dropped.
+export function messageSheetRows(items) {
+  const rows = [];
+  for (const it of items) {
+    if (it === "-") continue;
+    const prev = rows.at(-1);
+    if (it.pair && !it.danger && prev?.pair === it.pair && prev.items.length < 2) prev.items.push(it);
+    else rows.push({ pair: it.pair || "", full: !!it.danger, items: [it] });
+  }
+  return rows;
+}
+
+function sheetAction(it) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "ctx-item" + (it.danger ? " danger" : "");
+  b.innerHTML = (it.icon || "") + "<span>" + escapeHtml(it.short || it.label) + "</span>";
+  b.addEventListener("click", () => { closeAllPopups(); it.onClick?.(); });
+  return b;
+}
+
+// Mobile message menu: emoji grid, then related actions in two columns.
+// The last reaction cell opens a searchable tray and does not send a reaction.
+export function showMessageSheet({ reactions = [], onReact, items }) {
+  closeAllPopups();
+  const menu = document.createElement("div");
+  menu.className = "ctx-menu msg-sheet";
+  menu.setAttribute("role", "dialog");
+  menu.setAttribute("aria-label", "Message actions");
+  const grab = document.createElement("div");
+  grab.className = "msg-sheet-grab";
+  grab.setAttribute("aria-hidden", "true");
+  menu.append(grab);
+
+  if (reactions.length) {
+    const reacts = document.createElement("div");
+    reacts.className = "msg-reacts";
+    for (const emoji of reactions) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "msg-react";
+      b.textContent = emoji;
+      b.setAttribute("aria-label", emoji);
+      b.addEventListener("click", () => { closeAllPopups(); onReact?.(emoji); });
+      reacts.append(b);
+    }
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "msg-react msg-react-more";
+    more.setAttribute("aria-label", "More emoji");
+    more.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 14.2c1.2 1.1 2.5 1.6 4 1.6s2.8-.5 4-1.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="9" cy="10" r="1" fill="currentColor"/><circle cx="15" cy="10" r="1" fill="currentColor"/></svg>`;
+    const tray = document.createElement("div");
+    tray.className = "msg-emoji-tray";
+    tray.hidden = true;
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "text-field";
+    search.placeholder = "Search emoji";
+    search.setAttribute("aria-label", "Search emoji");
+    search.autocomplete = "off";
+    const grid = document.createElement("div");
+    grid.className = "msg-emoji-grid";
+    const paint = () => {
+      const found = searchEmoji(search.value);
+      grid.replaceChildren();
+      if (!found.length) {
+        const empty = document.createElement("div");
+        empty.className = "msg-emoji-empty";
+        empty.textContent = "No emoji";
+        grid.append(empty);
+        return;
+      }
+      for (const e of found) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "msg-emoji";
+        b.textContent = e.emoji;
+        b.setAttribute("aria-label", e.name);
+        b.addEventListener("click", () => { closeAllPopups(); onReact?.(e.emoji); });
+        grid.append(b);
+      }
+    };
+    search.addEventListener("input", paint);
+    more.addEventListener("click", () => {
+      reacts.hidden = true;
+      tray.hidden = false;
+      paint();
+      search.focus();
+    });
+    tray.append(search, grid);
+    reacts.append(more);
+    menu.append(reacts, tray);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "msg-actions";
+  for (const row of messageSheetRows(items)) {
+    const wrap = document.createElement("div");
+    wrap.className = row.full ? "msg-row-full" : "msg-pair";
+    if (row.pair) wrap.dataset.pair = row.pair;
+    for (const it of row.items) wrap.append(sheetAction(it));
+    actions.append(wrap);
+  }
+  menu.append(actions);
+
+  const overlay = document.createElement("div");
+  overlay.className = "pop-overlay";
+  overlay.addEventListener("pointerdown", closeAllPopups);
+  overlay.addEventListener("contextmenu", e => { e.preventDefault(); closeAllPopups(); });
+  popups().append(overlay, menu);
   return menu;
 }
 

@@ -547,7 +547,7 @@ test("Select text opens an in-bubble bar and blocks the message menu", async t =
 
   view._msgContextMenu(view.msgIndex.get(10), 8, 8);
   const menu = node("popups").querySelector(".ctx-menu");
-  const select = [...menu.children].find(b => b.innerHTML.includes(">Select text<"));
+  const select = [...menu.querySelectorAll("button")].find(b => b.innerHTML.includes(">Select text<"));
   assert.ok(select, "the message menu offers Select text");
   await select.fire("click");
 
@@ -616,7 +616,7 @@ test("Select text is offered for a caption, Copy text stays plain-text only", as
   const item = view.msgIndex.get(10);
   item.msg = { ...item.msg, viewtype: "image", text: "caption" };
   view._msgContextMenu(item, 4, 4);
-  const html = [...node("popups").querySelector(".ctx-menu").children].map(b => b.innerHTML);
+  const html = [...node("popups").querySelector(".ctx-menu").querySelectorAll("button")].map(b => b.innerHTML);
   assert.ok(html.some(h => h.includes(">Select text<")));
   assert.equal(html.some(h => h.includes(">Copy text<")), false);
 });
@@ -691,15 +691,31 @@ test("Select text is hidden on a fine pointer and shown on a coarse one", async 
 
   globalThis.matchMedia = (q) => ({ matches: q === "(hover: hover) and (pointer: fine)" });
   view._msgContextMenu(item, 4, 4);
-  let html = [...node("popups").querySelector(".ctx-menu").children].map(b => b.innerHTML);
+  let menu = node("popups").querySelector(".ctx-menu");
+  let html = [...menu.querySelectorAll("button")].map(b => b.innerHTML);
+  assert.equal(menu.className.includes("msg-sheet"), false, "a fine pointer keeps the vertical menu");
   assert.equal(html.some(h => h.includes(">Select text<")), false, "desktop menu has no Select text");
   assert.ok(html.some(h => h.includes(">Copy text<")));
 
   node("popups").replaceChildren();
   globalThis.matchMedia = () => ({ matches: false });
   view._msgContextMenu(item, 4, 4);
-  html = [...node("popups").querySelector(".ctx-menu").children].map(b => b.innerHTML);
+  menu = node("popups").querySelector(".ctx-menu");
+  html = [...menu.querySelectorAll("button")].map(b => b.innerHTML);
+  assert.ok(menu.className.includes("msg-sheet"), "a coarse pointer gets the bottom sheet");
   assert.ok(html.some(h => h.includes(">Select text<")), "a coarse pointer still gets Select text");
+  const reply = [...menu.querySelectorAll("button")].find(b => b.innerHTML.includes(">Reply<"));
+  const forward = [...menu.querySelectorAll("button")].find(b => b.innerHTML.includes(">Forward<"));
+  assert.equal(reply.parent, forward.parent, "Reply and Forward share a row");
+  const more = menu.querySelector(".msg-react-more");
+  assert.ok(more, "the last reaction cell opens the emoji tray");
+  await more.fire("click");
+  const tray = menu.querySelector(".msg-emoji-tray");
+  assert.equal(tray.hidden, false);
+  const search = menu.querySelector("input");
+  search.value = "heart";
+  await search.fire("input");
+  assert.ok([...menu.querySelectorAll(".msg-emoji")].some(b => b.textContent === "❤️"));
 });
 
 test("the message menu has no Read up to here item", async t => {
@@ -708,14 +724,14 @@ test("the message menu has no Read up to here item", async t => {
   const item = view.msgIndex.get(10);
   view._tracked = true;
   view._msgContextMenu(item, 4, 4);
-  let labels = [...node("popups").querySelector(".ctx-menu").children].map(b => b.innerHTML);
+  let labels = [...node("popups").querySelector(".ctx-menu").querySelectorAll("button")].map(b => b.innerHTML);
   assert.equal(labels.some(h => h.includes("Read up to here")), false);
   assert.equal(labels.some(h => h.includes("Remove read marker")), false);
 
   view.readMarkerId = item.msg.id;
   node("popups").replaceChildren();
   view._msgContextMenu(item, 4, 4);
-  labels = [...node("popups").querySelector(".ctx-menu").children].map(b => b.innerHTML);
+  labels = [...node("popups").querySelector(".ctx-menu").querySelectorAll("button")].map(b => b.innerHTML);
   assert.equal(labels.some(h => h.includes("Read up to here") || h.includes("Remove read marker")), false);
 });
 
@@ -1150,6 +1166,66 @@ test("swipe-back whose close path throws does not leave the column parked off-sc
   assert.equal(main.style.transform, "", "the chat comes back instead of a blank screen");
   assert.equal(main.style.transition, "");
   assert.equal(app.className.includes("swipe-back"), false);
+});
+
+test("a confirmed delete stays on screen until the undo bar ends", async t => {
+  const { view, core, node } = setup(t);
+  await view.open(7);
+  const calls = [];
+  core.deleteMessages = (chatId, ids, opts) => {
+    calls.push([chatId, [...ids], !!opts?.forAll]);
+    return Promise.resolve();
+  };
+  const mount = () => {
+    const row = document.createElement("div");
+    row.dataset.msgid = "10";
+    const bubble = document.createElement("div");
+    bubble.className = "bubble";
+    row.append(bubble);
+    node("history").replaceChildren(row);
+  };
+
+  view.deleteUndoMs = 5000;
+  mount();
+  view._holdDelete(view._session, [10], false);
+  let tomb = node("history").children[0];
+  assert.match(tomb.innerHTML, /This message was deleted/);
+  assert.match(tomb.innerHTML, /min-height:80px/);
+  assert.match(tomb.innerHTML, />Undo<span/);
+  assert.match(tomb.innerHTML, /animation-delay:-\d+ms/);
+  view._rowCache.delete("m10");
+  const again = view._renderItem(view.msgIndex.get(10));
+  assert.match(again.innerHTML, /animation-delay:-\d+ms/);
+  view._undoDelete(10);
+  assert.match(node("history").children[0].innerHTML, /message 10/);
+  assert.equal(calls.length, 0);
+  assert.equal(view._deleteBatches.size, 0);
+
+  view.deleteUndoMs = 20;
+  mount();
+  view._holdDelete(view._session, [10], true);
+  await wait(80);
+  assert.deepEqual(calls, [[7, [10], true]]);
+  assert.equal(view.msgIndex.has(10), false);
+
+  await view.open(7);
+  calls.length = 0;
+  view.deleteUndoMs = 60000;
+  mount();
+  view._holdDelete(view._session, [10], false);
+  view.close();
+  await wait(0);
+  assert.deepEqual(calls, [[7, [10], false]]);
+
+  await view.open(7);
+  calls.length = 0;
+  view.deleteUndoMs = 40;
+  mount();
+  view._holdDelete(view._session, [10], false);
+  view.onMsgsDeleted(7, [10]);
+  await wait(80);
+  assert.deepEqual(calls, []);
+  assert.equal(view._deleteBatches.size, 0);
 });
 
 test("closeChatUI keeps tearing the UI down when the view's close() throws", async () => {

@@ -510,6 +510,26 @@ html[data-theme="light"] .read-marker { color: #155a9e; border-color: #155a9e; }
 }
 .msg-row.selectable .msg-select-bar { display: none; }
 html[data-theme="light"] .msg-select-btn { background: rgba(16, 16, 16, .08); }
+/* Delete hold: the bubble stays its measured height until the undo bar ends. */
+.bubble.msg-deleted {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; text-align: center; box-sizing: border-box; color: var(--text-dim);
+}
+.msg-deleted-label { font-size: 14px; line-height: 1.35; }
+.msg-undo {
+  position: relative; overflow: hidden;
+  border: 0; border-radius: 14px;
+  min-height: 32px; padding: 6px 16px 8px;
+  background: rgba(244, 244, 244, .14); color: var(--text);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.msg-undo-bar {
+  position: absolute; left: 0; bottom: 0; height: 2px; width: 100%;
+  background: var(--accent); transform-origin: left center;
+  animation: msg-undo-shrink linear forwards;
+}
+@keyframes msg-undo-shrink { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+html[data-theme="light"] .msg-undo { background: rgba(16, 16, 16, .08); }
 .msg-row.out .bubble {
   background: var(--bg-bubble-out);
   border-bottom-left-radius: var(--radius-bubble);
@@ -1366,6 +1386,46 @@ velta-chat-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
 }
 .scale-opt input { accent-color: var(--accent); flex: none; }
 .ctx-sep { height: 1px; background: var(--border); margin: 5px 8px; }
+
+/* Phone message menu: bottom sheet, reactions, then two columns of pairs. */
+.ctx-menu.msg-sheet {
+  left: 0; right: 0; top: auto; bottom: 0;
+  width: auto; min-width: 0; max-height: min(80vh, 640px);
+  overflow: auto;
+  border-radius: 18px 18px 0 0;
+  border-bottom: 0;
+  padding: 6px 12px calc(12px + env(safe-area-inset-bottom));
+  animation: sheetIn .16s ease-out;
+}
+@keyframes sheetIn { from { transform: translateY(12px); } }
+.msg-sheet-grab {
+  width: 36px; height: 4px; border-radius: 4px;
+  background: var(--border); margin: 6px auto 12px;
+}
+.msg-reacts {
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  gap: 8px; margin-bottom: 12px;
+}
+.msg-react {
+  aspect-ratio: 1; border-radius: 50%;
+  background: var(--bg-hover); color: var(--text);
+  font-size: 22px; display: grid; place-items: center; padding: 0;
+}
+.msg-react svg { width: 22px; height: 22px; }
+.msg-react:active, .msg-emoji:active, .msg-actions .ctx-item:active { background: var(--bg-hover); }
+.msg-actions { display: flex; flex-direction: column; gap: 8px; }
+.msg-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.msg-actions .ctx-item {
+  background: var(--bg); border-radius: 12px; min-height: 48px;
+}
+.msg-emoji-tray { margin-bottom: 12px; }
+.msg-emoji-tray .text-field { width: 100%; margin: 0 0 8px; }
+.msg-emoji-grid {
+  display: grid; grid-template-columns: repeat(8, 1fr);
+  gap: 2px; max-height: 168px; overflow: auto;
+}
+.msg-emoji { font-size: 24px; line-height: 1.2; padding: 4px; border-radius: 8px; }
+.msg-emoji-empty { grid-column: 1 / -1; color: var(--text-dim); font-size: 14px; padding: 8px; }
 
 /* Popover UA sheet (inset:0, margin:auto, Canvas, border) leaks on unset
    properties. Do not set left/right here: the 821px toast query and the

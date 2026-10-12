@@ -1074,6 +1074,11 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   `(hover: hover) and (pointer: fine)` (#113: touch selects through this
   Select-text flow instead; `_bindSelectionQuote` gates itself, pinned by
   `tests/selection-quote.test.mjs`). The desktop menu does not offer Select text.
+  A coarse pointer gets a bottom sheet (`showMessageSheet`) instead of the
+  vertical menu: two rows of reactions, the last cell opening a searchable
+  emoji tray, then actions in two columns of related pairs (Reply/Forward,
+  Pin/Save, Edit/Resend, Copy/Select text, Select/Info). Delete is a full-width
+  row. Desktop keeps the vertical menu and the six-emoji React submenu.
   Multi-touch still cancels the long-press timer (the guard above); it does
   not enter selection.
 - **Send/receive ticks** (1.4.20, semantics updated post-1.4.36): the tick
@@ -1335,6 +1340,11 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   does NOT guarantee non-delivery (an oversized send can still reach the
   recipient), a local-only delete left the message alive on the other
   client. rpc-core `_mapMessage` carries `error: m.error || null`.
+  Menu, selection, and that Remove confirm first, then hold the bubble
+  (`deleteUndoMs`, 10s): centered "This message was deleted" plus Undo.
+  `deleteMessages` runs when the bar ends or `close()` flushes the hold.
+  Undo restores the whole batch and does not call the core. A remote or
+  ephemeral `msgs-deleted` drops the hold so the delete is not sent twice.
 - **Times are 24-hour**: `formatTime` and `formatDateTime` (format.js) force
   `hour12: false` and `hourCycle: "h23"`. `formatDateTime` is the `<time>`
   tooltip and the message-info clock. Don't reintroduce locale defaults

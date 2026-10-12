@@ -1,11 +1,14 @@
 // chat-view.js — virtualized message history (virtual-scroller) + composer
 import { formatTime, formatDay, formatDateTime, formatServerUrl, messageInfoState, formatBytes, timeTag, stampTime } from "./format.js";
 import { escapeHtml, escapeAttr, ticksSvg, setVideoLightboxOpener } from "./components.js";
-import { showContextMenu, showModal, showStickerPicker, closeAllPopups, confirmDeleteMessagesModal, confirmModal, toast, openImageLightbox, openVideoLightbox, CLOSE_SVG } from "./ui.js";
+import { showContextMenu, showMessageSheet, showModal, showStickerPicker, closeAllPopups, confirmDeleteMessagesModal, confirmModal, toast, openImageLightbox, openVideoLightbox, CLOSE_SVG } from "./ui.js";
 import { diagnosticRow } from "./diagnostics.js";
 import { openWebxdc, prefetchInfo, appIconUrl } from "./webxdc-manager.js";
 
 const QUICK_REACTIONS = ["👍", "❤️", "😂", "😮", "🎉", "👏"];
+// Two rows of six on the phone sheet. The last cell is the emoji tray, not a reaction.
+const SHEET_REACTIONS = ["👍", "👎", "❤️", "😂", "🎉", "😮", "🔥", "👀", "🙏", "😢", "💯"];
+const SHEET_PAIRS = ["send", "keep", "file", "own", "text", "meta"];
 
 // iOS Chrome/Edge/Firefox are WebKit, so they stay on the px-only image width.
 const ua = globalThis.navigator?.userAgent || "";
@@ -440,6 +443,12 @@ export class ChatView {
     this._seenFrame = 0;
     this._settling = false;
     this.seenFlushMs = 400;      // markseen batching window (tests shrink it)
+    // Delete stays on screen this long so Undo can restore it. The core
+    // call runs when the bar finishes (tests shrink the window).
+    this.deleteUndoMs = 10000;
+    this._deleteSeq = 0;
+    this._deleteBatches = new Map();
+    this._deleteByMsg = new Map();
     this.selection = new Set();
     this.replyTo = null;
     this.replyFragment = null;
@@ -735,6 +744,7 @@ export class ChatView {
   }
 
   close() {
+    this._flushPendingDeletes();
     this._typingStop();
     const input = document.getElementById("composer-input");
     // Rows the user already saw still count — unless the account changed
@@ -1061,14 +1071,11 @@ export class ChatView {
   // delete leaves the message alive on their client. It's our own message;
   // the deletion request propagates like any other "delete for everyone".
   async _deleteFailed(m) {
+    const session = this._session;
+    if (!this._isCurrent(session)) return;
     if (!(await confirmModal("Remove message", "Delete this message for everyone?"))) return;
-    try {
-      await this.core.deleteMessages(m.chatId, [m.id], { forAll: true });
-      this.onMsgsDeleted(m.chatId, [m.id]);
-    } catch (err) {
-      errToast(`Delete failed: ${err?.message || err}`);
-      diagnosticsSink.append("error", `fail-del ${m.id}: ${err?.message || err}`);
-    }
+    if (!this._isCurrent(session)) return;
+    this._holdDelete(session, [m.id], true);
   }
 
   async _lcRetryTransfer(m, memberId = null) {
@@ -1189,6 +1196,7 @@ export class ChatView {
   }
 
   onMsgsDeleted(chatId, ids) {
+    this._releaseHolds(ids);
     if (!this._isCurrent() || !this.chat || chatId !== this.chat.id) return;
     this.items = this.items.filter(it => !(it.type === "msg" && ids.includes(it.msg.id)));
     for (const id of ids) {
@@ -1345,7 +1353,7 @@ export class ChatView {
     const cached = this._rowCache.get(item.key);
     // Flags catch a stale day/unread/marker chip. The signature catches a
     // reaction or edit that landed while this chat was closed (#93).
-    const sig = item.type === "msg" ? this._rowSignature(item.msg) : null;
+    const sig = item.type === "msg" ? this._rowCacheSig(item) : null;
     if (cached && cached._veltaFlags === this._itemFlags(item)
         && (sig == null || this._rowSigCache.get(item.key) === sig)) {
       if (cached.querySelector?.("video")) {
@@ -1369,6 +1377,17 @@ export class ChatView {
       }
     }
     return el;
+  }
+
+  _holdKey(id) {
+    const key = this._deleteByMsg.get(id);
+    return key == null ? "" : String(key);
+  }
+
+  _rowCacheSig(item) {
+    const hold = this._holdKey(item.msg.id);
+    const sig = this._rowSignature(item.msg);
+    return hold ? sig + "\n" + hold : sig;
   }
 
   _itemFlags(item) {
@@ -1456,6 +1475,26 @@ export class ChatView {
     }
     if (showAvatar) {
       inner += `<velta-avatar name="${escapeHtml(fc.name)}" color="${fc.color}" size="42" contact-id="${fc.id ?? ""}" addr="${escapeAttr(fc.addr || "")}"${fc.avatar ? ` avatar="${escapeAttr(fileUrl(fc.avatar))}"` : ""}></velta-avatar>`;
+    }
+
+    const holdKey = this._deleteByMsg.get(m.id);
+    if (holdKey != null) {
+      const batch = this._deleteBatches.get(holdKey);
+      const h = batch?.heights.get(m.id) || 0;
+      const elapsed = batch ? Math.min(batch.ms, Math.max(0, Date.now() - batch.started)) : 0;
+      const undo = batch && !batch.committing
+        ? `<button type="button" class="msg-undo" data-undo>Undo<span class="msg-undo-bar" style="animation-duration:${batch.ms}ms;animation-delay:-${elapsed}ms"></span></button>`
+        : "";
+      inner += `<div class="bubble msg-deleted"${h ? ` style="min-height:${h}px"` : ""}><div class="msg-deleted-label">This message was deleted</div>${undo}</div>`;
+      row.innerHTML = inner;
+      if (item.readMarker) row.append(this._readMarkerEl());
+      row.querySelector("[data-undo]")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!alive()) return;
+        this._undoDelete(m.id);
+      });
+      return row;
     }
 
     let bubble = "";
@@ -2296,17 +2335,18 @@ export class ChatView {
     const session = this._session;
     if (!this._isCurrent(session) || this.msgIndex.get(item.msg.id) !== item) return;
     const m = item.msg;
-    if (m.kind === "service") return;
+    if (m.kind === "service" || this._deleteByMsg.has(m.id)) return;
+    const touch = this._offerSelectText();
     const items = [];
     // No reply without a composer (read-only chats).
-    if (!this.readOnly) items.push({ label: "Reply", icon: ICO.reply, onClick: () => this._setReply(item) });
+    if (!this.readOnly) items.push({ label: "Reply", pair: "send", icon: ICO.reply, onClick: () => this._setReply(item) });
     // Core mirrors these guards (own + plain text + non-empty); the menu just
     // hides the entry where the core would refuse. P2P chats keep a separate
     // message store — no edit there yet.
-    if (!this.chat?.isP2p && m.from === 1 && m.viewtype === "text" && m.text) items.push({ label: "Edit", icon: ICO.edit, onClick: () => this._setEdit(item) });
+    if (!this.chat?.isP2p && m.from === 1 && m.viewtype === "text" && m.text) items.push({ label: "Edit", pair: "own", icon: ICO.edit, onClick: () => this._setEdit(item) });
     if (!this.chat?.isP2p && m.viewtype === "sticker" && m.from !== 1 && m.filePath) {
       items.push({
-        label: "Save sticker", icon: ICO.download,
+        label: "Save sticker", short: "Sticker", pair: "file", icon: ICO.download,
         onClick: () => {
           this.core.saveSticker(m.id).then(() => toast("Sticker saved")).catch((err) => errToast("Couldn't save: " + (err.message || err)));
         },
@@ -2318,6 +2358,7 @@ export class ChatView {
     if (this.core.pinMessage && !p2pg) {
       items.push({
         label: m.pinned ? "Unpin" : "Pin",
+        pair: "keep",
         icon: ICO.pin,
         onClick: () => {
           this.core.pinMessage(m.id, !m.pinned)
@@ -2329,19 +2370,19 @@ export class ChatView {
     // Captions count: any bubble with text can enter selection mode. Copy
     // text stays whole-message and plain-text only. Touch only — desktop
     // uses the mouse and the floating Reply chip.
-    if (m.text && this._offerSelectText()) items.push({ label: "Select text", icon: ICO.copy, onClick: () => this._selectMessageText(m.id) });
-    if (m.viewtype === "text" && m.text) items.push({ label: "Copy text", icon: ICO.copy, onClick: () => { navigator.clipboard?.writeText(m.text); toast("Copied"); } });
+    if (m.viewtype === "text" && m.text) items.push({ label: "Copy text", short: "Copy", pair: "text", icon: ICO.copy, onClick: () => { navigator.clipboard?.writeText(m.text); toast("Copied"); } });
+    if (m.text && touch) items.push({ label: "Select text", pair: "text", icon: ICO.copy, onClick: () => this._selectMessageText(m.id) });
     if (!p2pg) items.push(
-      { label: "Forward", icon: ICO.forward, onClick: () => this._forward([m.id]) },
+      { label: "Forward", pair: "send", icon: ICO.forward, onClick: () => this._forward([m.id]) },
     );
     // Resend: re-queues the own message through the pipeline (core
     // resend_messages flips it back to OutPending and retransmits —
     // recipients get a duplicate). The core rejects info/drafts/pending
     // messages with an error, which _resendMessage toasts. P2P chats retry
     // through their own engine paths, not the core.
-    if (!this.chat?.isP2p && m.from === 1) items.push({ label: "Resend", icon: ICO.resend, onClick: () => this._resendMessage(m) });
+    if (!this.chat?.isP2p && m.from === 1) items.push({ label: "Resend", pair: "own", icon: ICO.resend, onClick: () => this._resendMessage(m) });
     if (!p2pg) items.push(
-      { label: "Save to Saved Messages", icon: ICO.star, onClick: async () => {
+      { label: "Save to Saved Messages", short: "Save", pair: "keep", icon: ICO.star, onClick: async () => {
         try {
           await this.core.starMessages(session.chatId, [m.id]);
           if (!this._isCurrent(session)) return;
@@ -2351,14 +2392,28 @@ export class ChatView {
           if (this._isCurrent(session)) errToast("Couldn't save message: " + (err.message || err));
         }
       } },
+    );
+    if (!p2pg && !touch) items.push(
       { label: "React", icon: QUICK_REACTIONS[0], onClick: () => this._reactionMenu(item, x, y) },
     );
-    items.push({ label: "Select", icon: ICO.select, onClick: () => this._enterSelection(m.id) });
-    items.push({ label: "Info", icon: ICO.info, onClick: () => this._showInfo(item) });
+    items.push({ label: "Select", pair: "meta", icon: ICO.select, onClick: () => this._enterSelection(m.id) });
+    items.push({ label: "Info", pair: "meta", icon: ICO.info, onClick: () => this._showInfo(item) });
     if (!p2pg) items.push("-", { label: "Delete", icon: ICO.trash, danger: true, onClick: () => this._delete([m.id]) });
-    showContextMenu(items.map(action => action === "-" ? action : {
+    const guarded = items.map(action => action === "-" ? action : {
       ...action, onClick: () => { if (this._isCurrent(session)) return action.onClick(); },
-    }), x, y);
+    });
+    if (!touch) { showContextMenu(guarded, x, y); return; }
+    const buckets = new Map(SHEET_PAIRS.map(k => [k, []]));
+    const tail = [];
+    for (const action of guarded) {
+      if (action === "-" || action.label === "React") continue;
+      (action.pair && buckets.has(action.pair) ? buckets.get(action.pair) : tail).push(action);
+    }
+    showMessageSheet({
+      reactions: p2pg ? [] : SHEET_REACTIONS,
+      onReact: (emoji) => { if (this._isCurrent(session)) return this.core.addReaction(session.chatId, m.id, emoji); },
+      items: [...SHEET_PAIRS.flatMap(k => buckets.get(k)), ...tail],
+    });
   }
 
   _reactionMenu(item, x, y) {
@@ -2431,14 +2486,136 @@ export class ChatView {
       && msgs.every(m => m.from === 1);
     const choice = await confirmDeleteMessagesModal(ids.length, canForAll);
     if (!choice || !this._isCurrent(session)) return;
+    this._holdDelete(session, ids, choice === "everyone");
+    if (this._isCurrent(session)) this.exitSelection();
+  }
+
+  // Swap the bubble for a same-height tombstone. The core delete waits until
+  // the undo bar finishes, so a mis-tap can put the message back. One batch
+  // shares one clock: Undo on any of them restores all of them.
+  _holdDelete(session, ids, forAll) {
+    ids = ids.filter(id => this.msgIndex.has(id) && !this._deleteByMsg.has(id));
+    if (!ids.length || !this._isCurrent(session)) return;
+    const key = ++this._deleteSeq;
+    const batch = {
+      key, ids, forAll: !!forAll, session,
+      chatId: session.chatId,
+      accountId: session.accountId,
+      ms: this.deleteUndoMs,
+      started: Date.now(),
+      heights: new Map(),
+      committing: false,
+      timer: null,
+    };
+    for (const id of ids) {
+      const h = this._bubbleHeight(id);
+      if (h) batch.heights.set(id, h);
+      this._deleteByMsg.set(id, key);
+    }
+    this._deleteBatches.set(key, batch);
+    batch.timer = setTimeout(() => { this._commitDelete(key); }, batch.ms);
+    this._repaintMsgs(ids);
+  }
+
+  _bubbleHeight(id) {
+    const bubble = this.listEl?.querySelector?.(`[data-msgid="${id}"]`)?.querySelector?.(".bubble");
+    const h = bubble?.getBoundingClientRect?.().height || 0;
+    return h > 0 ? Math.round(h) : 0;
+  }
+
+  _undoDelete(id) {
+    const key = this._deleteByMsg.get(id);
+    const batch = key == null ? null : this._deleteBatches.get(key);
+    if (!batch || batch.committing) return;
+    const ids = batch.ids;
+    this._forgetBatch(key);
+    this._repaintMsgs(ids);
+  }
+
+  _forgetBatch(key) {
+    const batch = this._deleteBatches.get(key);
+    if (!batch) return;
+    clearTimeout(batch.timer);
+    this._deleteBatches.delete(key);
+    for (const id of batch.ids) {
+      if (this._deleteByMsg.get(id) === key) this._deleteByMsg.delete(id);
+    }
+  }
+
+  // A remote or ephemeral delete drops the hold so we don't delete twice.
+  _releaseHolds(ids) {
+    const keys = new Set();
+    for (const id of ids) {
+      const key = this._deleteByMsg.get(id);
+      if (key == null) continue;
+      this._deleteByMsg.delete(id);
+      keys.add(key);
+    }
+    for (const key of keys) {
+      const batch = this._deleteBatches.get(key);
+      if (!batch) continue;
+      batch.ids = batch.ids.filter(id => this._deleteByMsg.get(id) === key);
+      if (!batch.ids.length) this._forgetBatch(key);
+    }
+  }
+
+  _repaintMsgs(ids) {
+    for (const id of ids) {
+      const item = this.msgIndex.get(id);
+      if (!item) continue;
+      this._rowCache.delete(item.key);
+      this._rowSigCache.delete(item.key);
+      const row = this.listEl?.querySelector?.(`[data-msgid="${id}"]`);
+      if (!row) continue;
+      const fresh = this._buildItem(item);
+      row.replaceWith(fresh);
+      this._rowCache.set(item.key, fresh);
+      this._rowSigCache.set(item.key, this._rowCacheSig(item));
+      this.vs?.onItemHeightDidChange?.(item);
+    }
+  }
+
+  // Leaving the chat commits a confirmed delete. The RPC captures accountId
+  // at call time, so this must run before the account id changes.
+  _flushPendingDeletes() {
+    for (const key of [...this._deleteBatches.keys()]) {
+      const batch = this._deleteBatches.get(key);
+      if (!batch || batch.committing) continue;
+      clearTimeout(batch.timer);
+      this._commitDelete(key);
+    }
+  }
+
+  async _commitDelete(key) {
+    const batch = this._deleteBatches.get(key);
+    if (!batch || batch.committing) return;
+    if (String(this.core.accountId) !== String(batch.accountId)) {
+      this._forgetBatch(key);
+      return;
+    }
+    batch.committing = true;
+    clearTimeout(batch.timer);
+    this._repaintMsgs(batch.ids);
     try {
-      await this.core.deleteMessages(session.chatId, ids, { forAll: choice === "everyone" });
-      if (!this._isCurrent(session)) return;
+      await this.core.deleteMessages(batch.chatId, batch.ids, { forAll: batch.forAll });
+    } catch (err) {
+      const ids = batch.ids;
+      this._forgetBatch(key);
+      this._repaintMsgs(ids);
+      if (String(this.core.accountId) === String(batch.accountId)) {
+        errToast("Couldn't delete messages: " + (err.message || err), 4500);
+      }
+      return;
+    }
+    const ids = batch.ids;
+    this._forgetBatch(key);
+    if (this._isCurrent(batch.session)) {
       this.exitSelection();
       this.onChatsChanged();
-    } catch (err) {
-      if (this._isCurrent(session)) errToast("Couldn't delete messages: " + (err.message || err), 4500);
     }
+    // The core event removes the rows when it arrives. If this view is still
+    // the one that deleted them, drop the rows now so the list doesn't wait.
+    if (this._isCurrent(batch.session) && this.chat?.id === batch.chatId) this.onMsgsDeleted(batch.chatId, ids);
   }
 
   _forward(ids) {
