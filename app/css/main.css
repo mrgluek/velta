@@ -1945,15 +1945,24 @@ li.failed .step-ico::after { content: "✕"; }
   min-width: 220px; max-width: calc(100vw - 90px);
 }
 .acct-pop[hidden] { display: none; }
-/* list entries styled like the head's pill buttons */
+/* list entries styled like the head's pill buttons. The pop lives inside
+   .drawer-head, whose light text would vanish on a light sidebar. */
 .acct-pop .ctx-item {
   background: rgba(244, 244, 244, .14);
   border: 1px solid rgba(244, 244, 244, .28);
   border-radius: 999px; padding: 7px 12px;
   font-size: 13.5px;
+  color: var(--text);
 }
 @media (hover: hover) and (pointer: fine) {
   .acct-pop .ctx-item:hover { background: rgba(244, 244, 244, .24); }
+}
+html[data-theme="light"] .acct-pop .ctx-item {
+  background: rgba(16, 16, 16, .06);
+  border-color: rgba(16, 16, 16, .14);
+}
+@media (hover: hover) and (pointer: fine) {
+  html[data-theme="light"] .acct-pop .ctx-item:hover { background: rgba(16, 16, 16, .1); }
 }
 .acct-pop .ctx-item svg { width: var(--ico-2); height: var(--ico-2); }
 
