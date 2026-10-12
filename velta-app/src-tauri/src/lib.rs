@@ -2350,6 +2350,7 @@ fn backup_scratch_dir(app: tauri::AppHandle) -> Result<String, String> {
     Ok(dir.to_string_lossy().into_owned())
 }
 
+#[cfg(target_os = "android")]
 fn newest_backup_tar(dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let mut best: Option<(std::time::SystemTime, std::path::PathBuf)> = None;
     for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
