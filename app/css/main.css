@@ -1564,6 +1564,9 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
 .info-row:last-child { border-bottom: 0; }
 .info-row .k { color: var(--text-dim); }
 .info-row .v { font-weight: 500; display: flex; align-items: center; gap: 6px; }
+.info-row.wrap { align-items: flex-start; gap: 12px; }
+.info-row.wrap .k { flex: none; }
+.info-row.wrap .v { display: block; margin-left: auto; max-width: 70%; text-align: right; overflow-wrap: anywhere; white-space: pre-line; }
 .info-row .v svg { width: var(--ico-2); height: var(--ico-2); }
 .info-row .v .avatar-profile-fpr { text-align: right; font-size: 12px; }
 /* disappearing-messages + mute editors (chat info sheet): option rows */

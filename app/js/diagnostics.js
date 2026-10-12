@@ -116,9 +116,9 @@ export function diagnosticRow(message) {
   const emoji = LEVEL_EMOJI[message.level] || "ℹ️";
   const text = String(message.text).replace(/^\[[A-Z]+\] /, "");
   bubble.textContent =
-    // 24-hour everywhere (AGENTS.md §5.1): toLocaleTimeString() alone would
-    // render "03:21 AM" on en-US devices.
-    `${new Date(message.ts).toLocaleTimeString([], { hour12: false })}  ${emoji} ${text}` +
+    // 24-hour everywhere (AGENTS.md §5.1): a bare locale time string
+    // renders "03:21 AM" on en-US devices.
+    `${new Date(message.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, hourCycle: "h23" })}  ${emoji} ${text}` +
     (message.count > 1 ? ` ×${message.count}` : "");
   const copy = document.createElement("button");
   copy.type = "button";

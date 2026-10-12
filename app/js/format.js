@@ -34,10 +34,42 @@ export function formatBytes(n) {
   return (n / 1048576).toFixed(1) + " MB";
 }
 
+// hourCycle h23 keeps midnight at 00, not 24, on engines where hour12:false still emits 24.
+const H24 = { hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23" };
+
 export function formatTime(ts) {
   const d = new Date(ts);
   // 24-hour everywhere, regardless of device locale
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+  return d.toLocaleTimeString([], H24);
+}
+
+// Date plus 24-hour time, for message info and <time> tooltips.
+export function formatDateTime(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "—";
+  const date = d.toLocaleDateString([], { year: "numeric", month: "2-digit", day: "2-digit" });
+  const time = d.toLocaleTimeString([], { ...H24, second: "2-digit" });
+  return `${date} ${time}`;
+}
+
+// Message-info State: Seen is the recipient MDN for outgoing, and not-unread for incoming.
+// encrypted === false is the core padlock off; a missing flag (local chat) stays Encrypted.
+export function messageInfoState(m) {
+  const seen = m?.from === 1 ? m.state === "read" : !m?.unread;
+  const enc = m?.encrypted === false ? "Not encrypted" : "Encrypted";
+  return `${seen ? "Seen" : "Not seen"}, ${enc}`;
+}
+
+// Core server URL "<addr/folder/;UID=n>" → "addr UID=n" (folder kept when it is not INBOX).
+export function formatServerUrl(raw) {
+  const s = String(raw ?? "");
+  const m = /^<(.+)\/;UID=(\d+)>$/.exec(s);
+  if (!m) return s;
+  const slash = m[1].indexOf("/");
+  if (slash < 0) return `${m[1]} UID=${m[2]}`;
+  const addr = m[1].slice(0, slash);
+  const folder = m[1].slice(slash + 1);
+  return folder && folder !== "INBOX" ? `${addr} ${folder} UID=${m[2]}` : `${addr} UID=${m[2]}`;
 }
 
 export function formatListTime(ts) {
@@ -71,7 +103,7 @@ export function timeParts(ts, { day = false } = {}) {
   const datetime = day
     ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
     : d.toISOString();
-  return { datetime, title: d.toLocaleString() };
+  return { datetime, title: formatDateTime(ts) };
 }
 
 export function timeTag(ts, text, { day = false, className = "" } = {}) {

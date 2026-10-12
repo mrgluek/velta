@@ -1086,9 +1086,13 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   circled icon would render as an ellipse there; the bubble additionally
   carries the reason badge + retry/remove). Chatmail is store-and-forward:
   pipeline visibility ENDS at the own relay's acceptance — "seen" comes only
-  from the recipient's MDN. Never promise per-recipient-relay delivery; the
-  message-info sheet phrases the pipeline in those terms
-  (chat-view `_showInfo`). The selection checkbox (`ICO.check`) is separate.
+  from the recipient's MDN. Never promise per-recipient-relay delivery. The
+  message-info sheet (`_showInfo`) shows Sent, Received (em dash when unset),
+  State as Seen/Not seen plus Encrypted/Not encrypted (Seen is the MDN for
+  outgoing, and not-unread for incoming), Database ID (`#id`), the RFC 724
+  Message-ID, and each server URL as `addr UID=n` (folder kept when it is
+  not INBOX). Message-ID and server URLs come from `get_message_info_object`.
+  The selection checkbox (`ICO.check`) is separate.
   KEEP (read-receipt lifecycle, verified live 2026-10-02 against real
   accounts — full narrative in `docs/agents/read-receipts.md`): the ONLY
   MDN trigger is the peer's client running `markseen_msgs`, and Velta fires
@@ -1331,9 +1335,10 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   does NOT guarantee non-delivery (an oversized send can still reach the
   recipient), a local-only delete left the message alive on the other
   client. rpc-core `_mapMessage` carries `error: m.error || null`.
-- **Times are 24-hour**: `formatTime` (format.js) forces `hour12: false`
-  and is the single timestamp source for chat rows, list rows and call
-  lists — don't reintroduce locale defaults (rendered `03:21 AM` on en-US).
+- **Times are 24-hour**: `formatTime` and `formatDateTime` (format.js) force
+  `hour12: false` and `hourCycle: "h23"`. `formatDateTime` is the `<time>`
+  tooltip and the message-info clock. Don't reintroduce locale defaults
+  (rendered `03:21 AM` on en-US).
 - All `:hover` styling lives inside
   `@media (hover: hover) and (pointer: fine)` — touch devices report
   `hover: none` and hover states stick after taps. `:active` press feedback

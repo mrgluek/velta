@@ -3,6 +3,7 @@
 // the plain-browser PWA has no iroh endpoint to talk to.
 
 import { showModal, toast, notifyIncoming } from "./ui.js";
+import { formatTime } from "./format.js";
 import { acquireCode } from "./qr-scan.js";
 import { diagnosticsSink } from "./diagnostics.js";
 import { createLocalGroup, groupAddMember, groupPickerModel, findDuplicateGroup, lcGroupName, GROUP_MAX_OTHERS, GROUP_NAME_MAX } from "./local-chat.js";
@@ -617,7 +618,7 @@ async function renderActiveChat() {
     bubble.textContent = m.text;
     const meta = document.createElement("div");
     meta.className = "p2p-msg-meta";
-    const time = new Date(m.ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const time = formatTime(m.ts);
     meta.textContent = m.dir === "out" ? `${time} · ${m.state}` : time;
     bubble.appendChild(meta);
     row.appendChild(bubble);

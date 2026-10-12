@@ -1,5 +1,5 @@
 // chat-view.js — virtualized message history (virtual-scroller) + composer
-import { formatTime, formatDay, formatBytes, timeTag, stampTime } from "./format.js";
+import { formatTime, formatDay, formatDateTime, formatServerUrl, messageInfoState, formatBytes, timeTag, stampTime } from "./format.js";
 import { escapeHtml, escapeAttr, ticksSvg, setVideoLightboxOpener } from "./components.js";
 import { showContextMenu, showModal, showStickerPicker, closeAllPopups, confirmDeleteMessagesModal, confirmModal, toast, openImageLightbox, openVideoLightbox, CLOSE_SVG } from "./ui.js";
 import { diagnosticRow } from "./diagnostics.js";
@@ -2371,27 +2371,15 @@ export class ChatView {
 
   _showInfo(item) {
     const m = item.msg;
-    // Honest pipeline phrasing: chatmail is store-and-forward, so what we
-    // can vouch for ENDS at the own relay's acceptance — "seen" only ever
-    // comes from the recipient's read receipt (MDN). Never promise more.
-    const stateLines = {
-      pending: "Sending — your relay has not accepted it yet (it retries on its own while the relay is unreachable)",
-      sent: "Sent — accepted by your relay",
-      delivered: "Sent — accepted by your relay",
-      read: "Sent and seen (the recipient's device confirmed)",
-      received: "Received",
-      failed: "Failed to send" + (m.error ? `: ${failReason(m.error)}` : ""),
-    };
     const grp = !!this.chat?.isP2pGroup;
-    if (grp) Object.assign(stateLines, {
-      pending: "Waiting — not delivered to any member yet (it retries when they come online)",
-      sent: "Sent — not yet received by every member",
-      delivered: "Sent — not yet received by every member",
-      read: "Received by every member",
-    });
     const encNote = grp
       ? "This message travels directly between the members' devices, with no relay. A tick turns double only when every current member has received it."
-      : "This message is end-to-end encrypted with OpenPGP. Only you and the recipient can read it — the chatmail relay cannot.";
+      : m.encrypted === false
+        ? "This message was not end-to-end encrypted."
+        : "This message is end-to-end encrypted with OpenPGP. Only you and the recipient can read it — the chatmail relay cannot.";
+    // Seen is the recipient MDN (outgoing) or this device having opened it (incoming).
+    let state = messageInfoState(m);
+    if (m.state === "failed" && m.error) state += `: ${failReason(m.error)}`;
     // Local groups: who has it, per member ("Bob ✓  Cal ✗").
     const deliveryRows = Array.isArray(m.delivery) && m.delivery.length
       ? `<div class="info-row"><span class="k">Delivered</span><span class="v">${m.delivery.filter(d => d.delivered).length} of ${m.delivery.length}</span></div>`
@@ -2402,18 +2390,32 @@ export class ChatView {
       title: "Message info",
       body: `
       <div class="enc-note">${ICO.lock}<span>${encNote}</span></div>
-      <div class="info-row"><span class="k">Type</span><span class="v">${m.viewtype}</span></div>
-      <div class="info-row"><span class="k">From</span><span class="v">${escapeHtml(m.fromContact.name)}</span></div>
-      <div class="info-row"><span class="k">Sent</span><span class="v">${new Date(m.ts).toLocaleString()}</span></div>
-      <div class="info-row"><span class="k">State</span><span class="v">${stateLines[m.state] || m.state}</span></div>
+      <div class="info-row"><span class="k">Type</span><span class="v">${escapeHtml(m.viewtype)}</span></div>
+      <div class="info-row"><span class="k">From</span><span class="v">${escapeHtml(m.fromContact?.name || "")}</span></div>
+      <div class="info-row"><span class="k">Sent</span><span class="v">${escapeHtml(formatDateTime(m.sentTs || m.ts))}</span></div>
+      <div class="info-row"><span class="k">Received</span><span class="v">${escapeHtml(m.receivedTs ? formatDateTime(m.receivedTs) : "—")}</span></div>
+      <div class="info-row"><span class="k">State</span><span class="v">${escapeHtml(state)}</span></div>
       ${deliveryRows}
-      <div class="info-row"><span class="k">Message ID</span><span class="v">#${m.id}</span></div>`,
+      <div class="info-row"><span class="k">Database ID</span><span class="v">#${escapeHtml(m.id)}</span></div>
+      <div class="info-row wrap"><span class="k">Message-ID</span><span class="v" data-mid>…</span></div>
+      <div class="info-row wrap"><span class="k">Server URL</span><span class="v" data-servers>…</span></div>`,
     });
     info.modal.querySelectorAll("[data-retry-member]").forEach(btn => btn.addEventListener("click", () => {
       btn.disabled = true;
       btn.textContent = "Retrying…";
       this._lcRetryTransfer(m, btn.dataset.retryMember);
     }));
+    const midEl = info.modal.querySelector("[data-mid]");
+    const urlEl = info.modal.querySelector("[data-servers]");
+    const paintInfo = (extra) => {
+      if (!info.modal.isConnected) return;
+      if (midEl) midEl.textContent = extra?.rfc724Mid || "—";
+      const lines = (extra?.serverUrls || []).map(formatServerUrl).filter(Boolean);
+      if (urlEl) urlEl.textContent = lines.join("\n") || "—";
+    };
+    // Local chats have no IMAP row. Demo core has no getMessageInfo.
+    if (this.chat?.isP2p || !this.core.getMessageInfo) { paintInfo(null); return; }
+    this.core.getMessageInfo(m.id).then(paintInfo).catch(() => paintInfo(null));
   }
 
   async _delete(ids) {

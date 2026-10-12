@@ -711,8 +711,9 @@ Outgoing messages show where they are in the pipeline:
 - **Two checks ✓✓** — the recipient's client confirmed it has seen the
   message (read receipt).
 - **Red !** — the send failed permanently; the bubble shows the reason and
-  Retry/Remove actions. **Message info** (context menu) phrases each state in
-  full.
+  Retry/Remove actions. **Message info** (context menu) shows when it was
+  sent and received, Seen and Encrypted, the database id, the Message-ID,
+  and the server URL (one line per copy on the server).
 
 Long-press/right-click one of your own messages and pick **Resend** to push
 the same message through the pipeline again — useful when the recipient says

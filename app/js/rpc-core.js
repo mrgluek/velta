@@ -833,10 +833,14 @@ export class JsonRpcCore extends EventTarget {
   }
 
   _mapMessage(m) {
+    // timestamp is when it was sent; receivedTimestamp is when this device got it (0 = unset).
+    const sentTs = m.timestamp > 0 ? m.timestamp * 1000 : null;
+    const receivedTs = m.receivedTimestamp > 0 ? m.receivedTimestamp * 1000 : null;
     if (m.isInfo) {
       return {
         id: m.id, chatId: m.chatId, kind: "service", viewtype: "text",
         from: 0, text: m.text || "", ts: (m.sortTimestamp || m.timestamp) * 1000,
+        sentTs, receivedTs,
         state: "read", fromContact: { name: "", color: "#888" },
         unread: this._isUnreadState(m.state),
       };
@@ -852,6 +856,7 @@ export class JsonRpcCore extends EventTarget {
       from: out ? 1 : 0,
       text: m.text || "",
       ts: (m.sortTimestamp || m.timestamp) * 1000,
+      sentTs, receivedTs,
       state: this._mapState(m.state),
       // Core error text for failed sends (e.g. "5.3.4 message file too big")
       error: m.error || null,
@@ -1525,6 +1530,16 @@ export class JsonRpcCore extends EventTarget {
 
   async getMessage(msgId) {    const m = await this._call("get_message", this.accountId, msgId);
     return this._mapMessage(m);
+  }
+
+  // RFC 724 Message-ID and IMAP server locations. Not on the message object.
+  async getMessageInfo(msgId) {
+    const { accountId } = this;
+    const info = await this._call("get_message_info_object", accountId, msgId);
+    return {
+      rfc724Mid: info?.rfc724Mid || "",
+      serverUrls: Array.isArray(info?.serverUrls) ? info.serverUrls : [],
+    };
   }
 
   async downloadFullMessage(msgId) {
