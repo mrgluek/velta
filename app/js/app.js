@@ -3359,9 +3359,12 @@ function openProfileManagement() {
     destInput.value = "/backup/export";
     exportBtn.disabled = false;
   } else if (isAndroid) {
-    // No directory picker on Android — export into a fixed folder next to
-    // the accounts directory and surface the path in the field.
-    destInput.value = (window.veltaAccountsDir || "").replace(/\/accounts\/?$/, "") + "/exports";
+    // The old fixed folder was app-private (/data/user/0/…/exports) — the
+    // file existed and the user could not open it. The save dialog asks
+    // where the file should go; the core still writes a temp tar first.
+    destInput.hidden = true;
+    panes.export.querySelector(".pm-hint").textContent =
+      "Writes this profile — messages, contacts and keys — into a backup file. You'll be asked where to save it. The profile stays signed in.";
     exportBtn.disabled = false;
   } else {
     const tauriInvoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
@@ -3384,10 +3387,30 @@ function openProfileManagement() {
     }
   }
   exportBtn.addEventListener("click", async () => {
-    const dest = destInput.value.trim();
-    if (!dest) { toast("Choose a destination folder first"); return; }
     const pass = passInput.value;
     if (pass && !passInput.reportValidity()) return;
+    const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+    let androidUri = "";
+    if (isAndroid && !pwaExport) {
+      if (!invoke) { toast("Backup export needs the Velta app"); return; }
+      const name = backupDownloadName(state.account?.addr, new Date().toISOString().slice(0, 10));
+      try {
+        const picked = await invoke("plugin:dialog|save", { options: {
+          title: "Save backup",
+          defaultPath: name,
+          filters: [{ name: "Velta backup", extensions: ["tar"] }],
+        }});
+        androidUri = typeof picked === "string" ? picked : "";
+      } catch (err) {
+        const msg = String(err?.message || err || "");
+        if (/cancel/i.test(msg)) return;
+        errToast("Couldn't open the save dialog: " + msg);
+        return;
+      }
+      if (!androidUri) return;
+    }
+    const dest = destInput.value.trim();
+    if (!androidUri && !pwaExport && !dest) { toast("Choose a destination folder first"); return; }
     lock(true);
     exportBtn.disabled = true;
     progressBox.hidden = false;
@@ -3401,6 +3424,12 @@ function openProfileManagement() {
     if (pwaExport) {
       await runBackupExport(pass || null);
       progressBox.textContent = "Backup downloaded — check your browser downloads.";
+    } else if (androidUri) {
+      const dir = await invoke("backup_scratch_dir");
+      await core.exportBackup(dir, pass || null);
+      progressBox.textContent = "Saving…";
+      await invoke("publish_backup", { dir, uri: androidUri });
+      progressBox.textContent = "Backup saved.";
     } else {
       await core.exportBackup(dest, pass || null);
     }

@@ -1523,7 +1523,9 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   one tabbed modal: `openProfileManagement()` (app.js) — Add profile (relay
   input + QR scan → `addAccountFromInvite`), Second device (provide-QR pane +
   receive hand-off), Export backup (`exportBackup` + `imex-progress`;
-  desktop folder picker, fixed `exports/` dir on Android, and in the PWA the
+  desktop folder picker, Android system save dialog (the core tar is
+  written in the cache and copied onto the content URI — the app-private
+  `exports/` dir is not a place the user can open), and in the PWA the
   wasm branch writes the core's `.tar` into memfs `/backup/export` and
   downloads it — gzip-compressed via `gzipBytes` as
   `velta-backup-<addr>-<date>.tar.gz` (plain byte-identical `.tar` where
