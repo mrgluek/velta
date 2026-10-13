@@ -1,0 +1,5 @@
+.gradle/
+build/
+local.properties
+# libsoarhelper.so, built from velta-app/soar-tunnel (see README.md)
+app/src/main/soarLibs/

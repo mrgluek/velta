@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -378,6 +379,47 @@ func TestProbeUsesTheRelayPort(t *testing.T) {
 		if _, ok := probed.Load(want); !ok {
 			t.Errorf("expected a TLS probe of %s", want)
 		}
+	}
+}
+
+func TestFixedProbeTargets(t *testing.T) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAuto, echoDialer("D:", &n), echoDialer("T:", &n))
+	cfg, err := Config{Zone: "t.example.org", Key: testKey, ProbeTargets: []string{" relay.example.org ", "", "mx.example.org:993"}}.Normalize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(cfg.ProbeTargets, ","); got != "relay.example.org:443,mx.example.org:993" {
+		t.Fatalf("probe targets %q", got)
+	}
+	tt.cfg.ProbeTargets = cfg.ProbeTargets
+	tt.useProbeTargets()
+	// An allowlisted site opened through the proxy must not become a probe
+	// target: it would answer and hide the block.
+	c, _ := socksConnect(t, tt.Addr(), "u", "p", "allowed.example.net:443")
+	c.Close()
+	var probed sync.Map
+	tt.probeTLS = func(_ context.Context, hostport, _ string) error {
+		probed.Store(hostport, true)
+		return nil
+	}
+	if res := tt.probe(); res.Relays != 2 {
+		t.Errorf("probed %d hosts, want the 2 fixed ones", res.Relays)
+	}
+	for _, want := range []string{"relay.example.org:443", "mx.example.org:993"} {
+		if _, ok := probed.Load(want); !ok {
+			t.Errorf("expected a TLS probe of %s", want)
+		}
+	}
+	if _, ok := probed.Load("allowed.example.net:443"); ok {
+		t.Error("a host seen in traffic was probed although targets are fixed")
+	}
+	nine := make([]string, 9)
+	for i := range nine {
+		nine[i] = fmt.Sprintf("h%d.example.org", i)
+	}
+	if _, err := (Config{Zone: "t.example.org", Key: testKey, ProbeTargets: nine}).Normalize(); err == nil {
+		t.Error("accepted 9 probe targets")
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"net"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -88,6 +89,7 @@ type Tunnel struct {
 	conns       map[*tracked]struct{}
 	relays      map[string]time.Time // relay host -> last seen in a CONNECT
 	relayPorts  map[string]string    // relay host -> TLS port to probe (the one the core used)
+	fixedProbes bool                 // cfg.ProbeTargets set: relays holds them and never learns
 	failStreak  int
 	okStreak    int
 	state       string
@@ -180,6 +182,7 @@ func Start(cfg Config) (*Tunnel, error) {
 		return nil, err
 	}
 	t.ln = ln
+	t.useProbeTargets()
 	t.setRouteLocked(initialRoute(cfg.Mode), "start")
 	t.log.add("started: mode=%s resolvers=%d (network %d, operator %s +%d) soar=%s", cfg.Mode, len(resolvers),
 		len(cfg.SystemResolvers), cfg.Operator, len(OperatorResolvers[cfg.Operator]), soarVersion())
@@ -197,6 +200,24 @@ func Start(cfg Config) (*Tunnel, error) {
 	go t.serve()
 	go t.monitor()
 	return t, nil
+}
+
+// useProbeTargets puts cfg.ProbeTargets in place of the learned relays.
+func (t *Tunnel) useProbeTargets() {
+	if len(t.cfg.ProbeTargets) == 0 {
+		return
+	}
+	t.fixedProbes = true
+	now := time.Now()
+	for _, hp := range t.cfg.ProbeTargets {
+		host, port, err := net.SplitHostPort(hp)
+		if err != nil {
+			continue
+		}
+		t.relays[host] = now
+		t.relayPorts[host] = port
+	}
+	t.log.add("probing fixed hosts: %s", strings.Join(t.cfg.ProbeTargets, ", "))
 }
 
 func initialRoute(mode string) Route {
@@ -339,7 +360,7 @@ func (t *Tunnel) handle(c net.Conn) {
 		t.log.add("socks: %v", err)
 		return
 	}
-	if host, _, err := net.SplitHostPort(addr); err == nil && net.ParseIP(host) == nil {
+	if host, _, err := net.SplitHostPort(addr); err == nil && net.ParseIP(host) == nil && !t.fixedProbes {
 		t.mu.Lock()
 		t.relays[host] = time.Now()
 		t.relayPorts[host] = probePort(addr)
