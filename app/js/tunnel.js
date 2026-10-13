@@ -68,6 +68,8 @@ export function describeTunnel(s) {
   switch (s.state) {
     case "blocked":
       return { headline: "Checking", detail: "The relays did not answer directly; checking again before switching to the tunnel." };
+    case "relays-down":
+      return { headline: "Direct", detail: "The relays answer neither directly nor through the tunnel: they seem to be down, so mail stays direct." };
     case "offline":
       return { headline: "No network", detail: "Neither the relays nor the allowlisted sites answer." };
     case "unknown":
@@ -91,9 +93,9 @@ export function pathLines(paths) {
   return [
     `paths: ${ok}/${rows.length} verified`,
     ...rows.map(p => {
-      const state = p.dead ? "dead" : p.suspended ? "suspended" : p.verified ? "ok" : "unverified";
+      const state = p.suspended ? "suspended" : p.verified ? "ok" : "unverified";
       const rtt = p.rtt ? `${Math.round(p.rtt / 1e6)}ms` : "-";
-      return `  ${p.resolver} ${p.transport} ${state} rtt=${rtt} loss=${(p.loss || 0).toFixed(2)} answers=${p.successes || 0} name=${p.name_len} ans=${p.answer_max}`;
+      return `  ${p.resolver} ${p.transport} ${state} rtt=${rtt} loss=${(p.loss || 0).toFixed(2)} answers=${p.successes || 0} name=${p.name_len} ans=${p.answer_limit || "-"}`;
     }),
   ];
 }
@@ -106,7 +108,7 @@ export function tunnelReport(s, { app = "", now = new Date() } = {}) {
     `soar: ${s.soar || "?"}`,
     `zone: ${s.zone || "?"}  resolvers: ${s.resolvers ?? "?"}`,
     `mode: ${s.mode}  route: ${s.route}  state: ${s.state}  since: ${s.route_since || "?"}`,
-    `last probe: ${s.last_probe || "never"}  relays ok ${s.last_result?.relay_ok ?? 0}/${s.last_result?.relays ?? 0}  canary ok: ${!!s.last_result?.canary_ok}`,
+    `last probe: ${s.last_probe || "never"}  relays ok ${s.last_result?.relay_ok ?? 0}/${s.last_result?.relays ?? 0}  canary ok: ${!!s.last_result?.canary_ok}${s.last_result?.tunnel_checked ? `  via tunnel ok: ${!!s.last_result.tunnel_ok}` : ""}`,
     `relays: ${(s.relays || []).join(", ") || "none yet"}`,
     `network: ${s.network?.transport || "?"}  operator: ${s.network?.sim_operator || s.operator || "?"} ${s.network?.operator_name || ""}  private dns: ${s.network?.private_dns ? s.network.private_dns_name || "on" : "off"}`,
     `network resolvers: ${(s.network_resolvers || []).join(", ") || "none"}`,

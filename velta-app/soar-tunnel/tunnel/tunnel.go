@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -49,6 +50,7 @@ const (
 	directDialTimeout     = 8 * time.Second
 	tunnelDialTimeout     = 60 * time.Second
 	probeTimeout          = 6 * time.Second
+	tunnelProbeTimeout    = 30 * time.Second // a cold soar session needs its hellos first
 	minProbeGap           = 10 * time.Second
 	blockedAfter          = 2 // consecutive "relays fail, canary ok" probes before switching to the tunnel
 	recoveredAfter        = 3 // consecutive "a relay answers directly" probes before switching back
@@ -76,6 +78,11 @@ type Tunnel struct {
 	dialDirect dialFunc
 	dialTunnel dialFunc
 	probeTLS   func(ctx context.Context, hostport, sni string) error
+	// probeTunnel is probeTLS through the tunnel. established reports a live
+	// soar session: only then does a relay failing through the tunnel prove
+	// the relay is down (see confirmViaTunnel).
+	probeTunnel func(ctx context.Context, hostport, sni string) error
+	established func() bool
 
 	mu          sync.Mutex
 	mode        string
@@ -117,6 +124,12 @@ type probeResult struct {
 	Relays   int  `json:"relays"`
 	RelayOK  int  `json:"relay_ok"`
 	CanaryOK bool `json:"canary_ok"`
+	// Set by confirmViaTunnel before a switch to the tunnel: the same relays
+	// probed through a live tunnel session.
+	TunnelChecked bool `json:"tunnel_checked,omitempty"`
+	TunnelOK      bool `json:"tunnel_ok,omitempty"`
+
+	hosts []string // the relays probed, most recent first
 }
 
 // Start validates cfg, creates the soar client and starts serving SOCKS5.
@@ -173,6 +186,10 @@ func Start(cfg Config) (*Tunnel, error) {
 	t.dialDirect = d.DialContext
 	t.dialTunnel = client.DialContext
 	t.probeTLS = probeTLS
+	t.probeTunnel = func(ctx context.Context, hostport, sni string) error {
+		return probeTLSVia(ctx, t.dialTunnel, hostport, sni)
+	}
+	t.established = client.Established
 
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if err != nil {
@@ -462,7 +479,7 @@ func (t *Tunnel) monitor() {
 			case <-time.After(minProbeGap - since):
 			}
 		}
-		t.applyProbe(t.probe())
+		t.applyProbe(t.confirmViaTunnel(t.probe()))
 	}
 }
 
@@ -476,6 +493,8 @@ func (t *Tunnel) nextProbeIn() time.Duration {
 		return 30 * time.Second
 	case t.route == RouteTunnel:
 		return 30 * time.Second
+	case t.state == stateRelaysDown:
+		return time.Minute // each check costs a TLS handshake through the tunnel
 	case t.failStreak > 0:
 		return 15 * time.Second
 	case t.state == "unknown":
@@ -499,7 +518,7 @@ func (t *Tunnel) probe() probeResult {
 	if len(hosts) > maxProbedRelays {
 		hosts = hosts[:maxProbedRelays]
 	}
-	res := probeResult{Relays: len(hosts)}
+	res := probeResult{Relays: len(hosts), hosts: hosts}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, h := range hosts {
@@ -540,6 +559,46 @@ func (t *Tunnel) probe() probeResult {
 	return res
 }
 
+// confirmViaTunnel runs when the next "blocked" probe would switch to the
+// tunnel. Every relay failing while a canary answers also describes a relay
+// that is simply down (one profile, one relay); the tunnel tells them apart:
+// if a live session can't reach any relay either, the server can't, so the
+// relays are down and switching would only move mail onto a slower route.
+// Without a live session a failure proves nothing, and the switch goes ahead.
+func (t *Tunnel) confirmViaTunnel(res probeResult) probeResult {
+	t.mu.Lock()
+	switching := t.mode == ModeAuto && t.route == RouteDirect &&
+		res.Relays > 0 && res.RelayOK == 0 && res.CanaryOK && t.failStreak+1 >= blockedAfter
+	t.mu.Unlock()
+	if !switching || t.probeTunnel == nil || t.established == nil {
+		return res
+	}
+	var ok atomic.Bool
+	var wg sync.WaitGroup
+	for _, h := range res.hosts {
+		wg.Add(1)
+		go func(h string) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(t.ctx, tunnelProbeTimeout)
+			defer cancel()
+			t.mu.Lock()
+			port := t.relayPorts[h]
+			t.mu.Unlock()
+			if port == "" {
+				port = "443"
+			}
+			if t.probeTunnel(ctx, net.JoinHostPort(h, port), h) == nil {
+				ok.Store(true)
+			}
+		}(h)
+	}
+	wg.Wait()
+	if ok.Load() || t.established() {
+		res.TunnelChecked, res.TunnelOK = true, ok.Load()
+	}
+	return res
+}
+
 func (t *Tunnel) applyProbe(res probeResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -548,7 +607,11 @@ func (t *Tunnel) applyProbe(res probeResult) {
 	healthy := t.tunnelFails == 0 && (t.client == nil || t.client.Established())
 	route, fail, ok, state := decide(t.route, res, t.failStreak, t.okStreak, healthy)
 	if state != t.state {
-		t.log.add("state %s -> %s (relays %d/%d ok, canary ok=%v)", t.state, state, res.RelayOK, res.Relays, res.CanaryOK)
+		via := ""
+		if res.TunnelChecked {
+			via = fmt.Sprintf(", via tunnel ok=%v", res.TunnelOK)
+		}
+		t.log.add("state %s -> %s (relays %d/%d ok, canary ok=%v%s)", t.state, state, res.RelayOK, res.Relays, res.CanaryOK, via)
 	}
 	t.failStreak, t.okStreak, t.state = fail, ok, state
 	if t.mode == ModeAuto {
@@ -560,7 +623,9 @@ func (t *Tunnel) applyProbe(res probeResult) {
 //   - any relay answering directly means the network is normal (one dead
 //     relay is that relay's problem, not an allowlist); leaving the tunnel
 //     takes recoveredAfter such probes, or one if the tunnel is failing;
-//   - every relay failing while the canary answers means "blocked";
+//   - every relay failing while the canary answers means "blocked", unless
+//     the relays fail through a live tunnel too: then they are down
+//     ("relays-down") and the route stays;
 //   - everything failing means "offline": change nothing.
 func decide(route Route, res probeResult, failStreak, okStreak int, tunnelHealthy bool) (Route, int, int, string) {
 	switch {
@@ -578,6 +643,9 @@ func decide(route Route, res probeResult, failStreak, okStreak int, tunnelHealth
 	case res.CanaryOK:
 		failStreak++
 		if route == RouteDirect && failStreak >= blockedAfter {
+			if res.TunnelChecked && !res.TunnelOK {
+				return route, failStreak, 0, stateRelaysDown
+			}
 			route = RouteTunnel
 		}
 		return route, failStreak, 0, "blocked"
@@ -598,6 +666,19 @@ func probePort(addr string) string {
 		}
 	}
 	return "443"
+}
+
+// stateRelaysDown: the relays fail directly and through the tunnel.
+const stateRelaysDown = "relays-down"
+
+// probeTLSVia completes a TLS handshake with hostport over a connection from dial.
+func probeTLSVia(ctx context.Context, dial dialFunc, hostport, sni string) error {
+	c, err := dial(ctx, "tcp", hostport)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	return tls.Client(c, &tls.Config{ServerName: sni, MinVersion: tls.VersionTLS12}).HandshakeContext(ctx)
 }
 
 func probeTLS(ctx context.Context, hostport, sni string) error {
