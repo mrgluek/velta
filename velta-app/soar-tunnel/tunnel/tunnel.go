@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -40,6 +41,8 @@ func (r Route) String() string {
 // soar tuning measured on Yandex/NSDI paths (2026-10): soar's default
 // 101-char starting name length never grew there and capped upload at
 // ~1.5 KB/s; full-length names and a wider per-path window gave ~4x.
+// Config.SafeQName overrides the starting length (the helper app's
+// "short names first" switch, to retry soar's ramp in the field).
 const (
 	soarSafeQName  = 253
 	soarPathWindow = 64
@@ -172,7 +175,7 @@ func Start(cfg Config) (*Tunnel, error) {
 		ServerKey:     ed25519.PublicKey(key),
 		Resolvers:     resolvers,
 		TCP:           "auto",
-		SafeQName:     soarSafeQName,
+		SafeQName:     cmp.Or(cfg.SafeQName, soarSafeQName),
 		MaxPathWindow: soarPathWindow,
 		DialTCP:       dialResolver,
 		StreamOnly:    isDoT, // DoT resolvers get their TCP (TLS) path at once, no doomed UDP probe

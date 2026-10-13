@@ -17,6 +17,7 @@ import android.os.PowerManager
 import android.text.InputType
 import android.view.View
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.RadioButton
@@ -28,7 +29,8 @@ import java.util.concurrent.Executors
 
 /**
  * One screen: the tunnel link (pasted once, kept in app-private storage),
- * the probe hosts, the routing mode, start/stop and the live status.
+ * the probe hosts, the routing mode, start/stop and the live status. Once the
+ * link checks out, link and probe hosts fold under a one-line summary.
  */
 class MainActivity : Activity() {
     private val worker = Executors.newSingleThreadExecutor()
@@ -38,6 +40,10 @@ class MainActivity : Activity() {
     private lateinit var linkEdit: EditText
     private lateinit var linkInfo: TextView
     private lateinit var probeEdit: EditText
+    private lateinit var setupHeader: TextView
+    private lateinit var setupBox: LinearLayout
+    private var setupOpen = true
+    private var linkSummary = ""
     private lateinit var modeGroup: RadioGroup
     private lateinit var startButton: Button
     private lateinit var stopButton: Button
@@ -57,9 +63,12 @@ class MainActivity : Activity() {
         setContentView(buildUi())
         linkEdit.setText(settings.link)
         probeEdit.setText(settings.probeHosts)
+        // Fold at once when a link is saved, so the key never flashes on screen
+        // while describeLink checks it in the background (a bad link unfolds).
+        setSetupOpen(settings.link.isEmpty())
         modeGroup.check(MODES.indexOf(settings.mode).coerceAtLeast(0) + 1)
         modeGroup.setOnCheckedChangeListener { _, id -> onMode(MODES[id - 1]) }
-        describeLink()
+        describeLink(collapseIfOk = true)
     }
 
     override fun onResume() {
@@ -96,7 +105,23 @@ class MainActivity : Activity() {
                 "only allowlisted sites work. A direct connection that fails also retries through the tunnel."
         })
 
-        label("Tunnel link")
+        // Link and probe hosts are set once: after that they fold away so the
+        // status table gets the screen. Tapping the header unfolds them.
+        setupHeader = TextView(this).apply {
+            setPadding(0, pad, 0, 0)
+            setTypeface(typeface, Typeface.BOLD)
+            setOnClickListener { setSetupOpen(!setupOpen) }
+        }
+        col.addView(setupHeader)
+        setupBox = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        col.addView(setupBox)
+        fun boxLabel(text: String) = TextView(this).apply {
+            this.text = text
+            setPadding(0, (8 * dp).toInt(), 0, (4 * dp).toInt())
+            setTypeface(typeface, Typeface.BOLD)
+        }.also { setupBox.addView(it) }
+
+        boxLabel("Tunnel link")
         linkEdit = EditText(this).apply {
             hint = "velta://tunnel?v=1&zone=…&key=…"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
@@ -105,12 +130,12 @@ class MainActivity : Activity() {
             maxLines = 4
             textSize = 13f
         }
-        col.addView(linkEdit)
+        setupBox.addView(linkEdit)
         linkInfo = TextView(this).apply { textSize = 13f }
-        col.addView(linkInfo)
+        setupBox.addView(linkInfo)
 
-        label("Probe hosts")
-        col.addView(TextView(this).apply {
+        boxLabel("Probe hosts")
+        setupBox.addView(TextView(this).apply {
             textSize = 13f
             text = "Hosts that are NOT on the allowlist, e.g. your relay (host or host:port, comma-separated). " +
                 "Empty = learn them from traffic, which only works if nothing but a mail app uses the proxy."
@@ -122,7 +147,20 @@ class MainActivity : Activity() {
             isSingleLine = true
             textSize = 13f
         }
-        col.addView(probeEdit)
+        setupBox.addView(probeEdit)
+
+        setupBox.addView(CheckBox(this).apply {
+            text = "Short names first (soar default: start at 101 chars, grow to 253)"
+            textSize = 13f
+            isChecked = settings.shortNames
+            setOnCheckedChangeListener { _, on ->
+                settings.shortNames = on
+            }
+        })
+        setupBox.addView(Button(this).apply {
+            text = "Save"
+            setOnClickListener { onSaveClicked() }
+        })
 
         label("Route")
         modeGroup = RadioGroup(this).apply { orientation = RadioGroup.HORIZONTAL }
@@ -138,7 +176,10 @@ class MainActivity : Activity() {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, pad, 0, 0)
         }
-        startButton = Button(this).apply { setOnClickListener { onStartClicked() } }
+        startButton = Button(this).apply {
+            text = "Start"
+            setOnClickListener { onStartClicked() }
+        }
         stopButton = Button(this).apply {
             text = "Stop"
             setOnClickListener { TunnelService.stop(this@MainActivity) }
@@ -186,6 +227,28 @@ class MainActivity : Activity() {
         settings.probeHosts = probeEdit.text.toString()
     }
 
+    /** Stores link and probe hosts, folds them if the link is valid, and restarts a running proxy. */
+    private fun onSaveClicked() {
+        saveFields()
+        val link = settings.link
+        worker.execute {
+            val err = try {
+                Native.parse(link).optString("error")
+            } catch (e: Throwable) {
+                "native library: ${e.message ?: e}"
+            }
+            runOnUiThread {
+                describeLink(collapseIfOk = true)
+                if (err.isNotEmpty()) {
+                    Toast.makeText(this, "Link: $err", Toast.LENGTH_LONG).show()
+                } else if (TunnelService.active) {
+                    TunnelService.start(this) // start while running = restart with the saved settings
+                    main.postDelayed({ refresh() }, 500)
+                }
+            }
+        }
+    }
+
     private fun onStartClicked() {
         saveFields()
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -201,7 +264,7 @@ class MainActivity : Activity() {
                 "native library: ${e.message ?: e}"
             }
             runOnUiThread {
-                describeLink()
+                describeLink(collapseIfOk = true)
                 if (err.isNotEmpty()) {
                     Toast.makeText(this, "Link: $err", Toast.LENGTH_LONG).show()
                 } else {
@@ -224,32 +287,62 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Validates the saved link and says which tunnel zone it names. */
-    private fun describeLink() {
+    /**
+     * Validates the saved link and says which tunnel zone it names. A valid
+     * link folds the setup fields when [collapseIfOk]; a bad one unfolds them.
+     */
+    private fun describeLink(collapseIfOk: Boolean = false) {
         val link = settings.link
         if (link.isEmpty()) {
             linkInfo.text = "Paste the velta://tunnel link you got for this tunnel."
+            linkSummary = ""
+            setSetupOpen(true)
             return
         }
         worker.execute {
+            var ok = false
+            var summary = ""
             val text = try {
                 val cfg = Native.parse(link)
                 val err = cfg.optString("error")
                 if (err.isNotEmpty()) "Invalid link: $err"
                 else {
+                    ok = true
                     val extra = cfg.optJSONArray("resolvers")?.length() ?: 0
+                    summary = "Link OK" + if (extra > 0) ", $extra extra resolvers" else ""
                     "Link OK: zone ${cfg.optString("zone")}" + if (extra > 0) ", $extra extra resolvers" else ""
                 }
             } catch (e: Throwable) {
                 "Native library missing or broken: ${e.message ?: e}"
             }
-            runOnUiThread { linkInfo.text = text }
+            runOnUiThread {
+                linkInfo.text = text
+                linkSummary = summary
+                when {
+                    !ok -> setSetupOpen(true)
+                    collapseIfOk -> setSetupOpen(false)
+                    else -> setSetupOpen(setupOpen)
+                }
+            }
+        }
+    }
+
+    /** Shows or folds the link / probe-host fields; the header sums them up. */
+    private fun setSetupOpen(open: Boolean) {
+        setupOpen = open
+        setupBox.visibility = if (open) View.VISIBLE else View.GONE
+        setupHeader.text = if (open) {
+            "▾ Tunnel link and probe hosts"
+        } else {
+            val probes = settings.probeTargets()
+            val probeText = if (probes.isEmpty()) "learned from traffic" else probes.joinToString(", ")
+            "▸ ${linkSummary.ifEmpty { "Tunnel link" }}\n   probe hosts: $probeText"
         }
     }
 
     private fun refresh() {
         val active = TunnelService.active
-        startButton.text = if (active) "Apply" else "Start"
+        startButton.visibility = if (active) View.GONE else View.VISIBLE
         stopButton.visibility = if (active) View.VISIBLE else View.GONE
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         batteryButton.visibility =

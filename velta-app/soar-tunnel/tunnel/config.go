@@ -84,6 +84,10 @@ type Config struct {
 	Listen          string   `json:"listen,omitempty"` // default 127.0.0.1:0
 	User            string   `json:"user,omitempty"`   // SOCKS5 credentials; empty = no auth
 	Pass            string   `json:"pass,omitempty"`
+	// SafeQName is the query-name length every resolver path starts at; soar
+	// grows it to the 253 maximum after a few answers. 0 = start at 253 (see
+	// soarSafeQName); 101 = soar's own default, kept for field comparison.
+	SafeQName int `json:"safe_qname,omitempty"`
 }
 
 // ParseLink parses velta://tunnel?v=1&zone=<zone>&key=<base64>[&r=<ip:port,…>][&c=<host:port,…>].

@@ -157,7 +157,9 @@ under the client's lock, so `isDoT` must stay a pure string check.
 soar is pre-release (protocol may change; server and client must be
 upgraded together; `go.mod` pins a release). Its 101-char starting name
 length never grew on Yandex paths and capped upload near 1.5 KB/s; the
-library sets `SafeQName 253`, `MaxPathWindow 64`. soar's own server refuses
+library sets `SafeQName 253`, `MaxPathWindow 64` (config `safe_qname`
+overrides the start, e.g. 101 to retry soar's ramp; the helper app exposes
+it as "Short names first"). soar's own server refuses
 loopback/private destinations; restrict its egress to the relays with an
 owner-match firewall chain on the server.
 
