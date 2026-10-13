@@ -5,6 +5,7 @@ import { fileUrl } from "./media.js";
 import { linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_LABELS, LINK_PREVIEW_IP_WARNING } from "./link-preview.js";
 import { trackingStripEnabled, setTrackingStripEnabled } from "./trackers.js";
 import { APP_VERSION } from "./version.gen.js";
+import { formatSplashVersion } from "./format.js";
 import { searchEmoji } from "./emoji.js";
 
 const popups = () => document.getElementById("popups");
@@ -501,6 +502,9 @@ export function setCoreVersionDisplay(v) {
   if (!v) return;
   CORE_VERSION = String(v).replace(/^v/, "");
   document.querySelectorAll('[data-v="core"]').forEach((el) => { el.textContent = CORE_VERSION; });
+  // Splash version line (#127) keeps the same core string once it is known.
+  const splash = document.getElementById("splash");
+  if (splash) fillSplashVersion(splash);
 }
 /* ---------- Update check (drawer banner + menu-button nudge) ---------- */
 // The latest release version lives in a version.txt asset attached to every
@@ -703,7 +707,7 @@ export function setUiScale(v) {
   applyUiScale();
 }
 
-async function getAppVersion() {
+export async function getAppVersion() {
   try {
     const tauri = window.__TAURI__;
     if (tauri?.app?.getVersion) return await tauri.app.getVersion();
@@ -713,7 +717,7 @@ async function getAppVersion() {
 }
 
 // Cache name is the service worker version: velta-vNN, or velta-pwa-<hash>.
-async function getSwVersion() {
+export async function getSwVersion() {
   try {
     const keys = await caches.keys();
     const m = keys.map(k => /^velta-(v\d+|pwa-[0-9a-f]{12})$/.exec(k)).find(Boolean);
@@ -723,12 +727,19 @@ async function getSwVersion() {
 }
 
 // Tauri framework version (not the app version).
-async function getTauriVersion() {
+export async function getTauriVersion() {
   try {
     const v = await window.__TAURI__?.app?.getTauriVersion?.();
     if (v) return v;
   } catch {}
   return null;
+}
+
+export async function fillSplashVersion(el) {
+  const slot = el?.querySelector?.("[data-splash-ver]");
+  if (!slot) return;
+  const [app, tauri, sw] = await Promise.all([getAppVersion(), getTauriVersion(), getSwVersion()]);
+  slot.textContent = formatSplashVersion({ app, core: CORE_VERSION, tauri, sw });
 }
 
 /* ---------- Settings drawer ---------- */

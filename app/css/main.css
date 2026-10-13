@@ -1842,6 +1842,10 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; padding: 32px 24px 12px;
 }
+.splash-ver {
+  font-size: 13px; line-height: 1.4; color: var(--text-dim, #999);
+  margin: 0 0 12px; max-width: 420px;
+}
 .splash-logo { width: 132px; height: 132px; margin-bottom: 18px; }
 .splash-title { font-size: 30px; font-weight: 700; margin: 0 0 10px; }
 .splash-tag { font-size: 14.5px; line-height: 1.55; color: var(--text-dim, #999); max-width: 420px; margin: 0 0 26px; }

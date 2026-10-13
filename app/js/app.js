@@ -11,7 +11,7 @@ import { initWebxdc } from "./webxdc-manager.js";
 import { diagnosticsSink, DiagnosticsStore, DIAGNOSTICS_CHAT_ID, diagnosticRow, isSendFailureDiagnostic, createRelaySendErrorState } from "./diagnostics.js";
 import { parseInviteLink, inviteLabel, bindInviteInterception, showInviteDomainsModal, isShortInviteLink, expandShortInvite } from "./invites.js";
 import { activeWsRelay, addWsRelay, listWsRelays, normalizeHost, probeC3Relay, probeDnsVia, showWsRelaysModal, useWsRelay } from "./ws-relays.js";
-import { buildDrawer, showModal, showContextMenu, toast, closeAllPopups, confirmModal, showInvite, showEditProfile, notifyIncoming, setCoreVersionDisplay, checkForUpdate, popoverSupported } from "./ui.js";
+import { buildDrawer, showModal, showContextMenu, toast, closeAllPopups, confirmModal, showInvite, showEditProfile, notifyIncoming, setCoreVersionDisplay, checkForUpdate, popoverSupported, fillSplashVersion } from "./ui.js";
 import { p2pAvailable, p2pEnabled, setP2pEnabled, pairNearbyFlow, showInviteModal, addContact, showCreateGroupModal, showAddMembersModal } from "./p2p.js";
 import { withLocalChat, hubModel, renameDevice, removePeer, dismissLocalGroup, groupRename, groupRemoveMember, peerGroupImpact, groupActionsModel, groupMemberHint, removePeerImpactText, lcQueueItems, retryQueuedItem, cancelQueuedItem } from "./local-chat.js";
 import { timeAgo, formatBytes, timeTag } from "./format.js";
@@ -4626,9 +4626,10 @@ function normalizeRelayLink(raw) {
 }
 
 // The "Welcome to Velta" splash. Shown full-screen whenever the current
-// account is unconfigured (first boot): large Velta logo, tagline, the three
-// setup paths (create an account / add as a second device / restore from a
-// backup) and a collapsed app-log footer for errors and debug messages.
+// account is unconfigured (first boot): version line (#127), large Velta logo,
+// tagline, the three setup paths (create an account / add as a second device /
+// restore from a backup) and a collapsed app-log footer for errors and debug
+// messages.
 // Removes itself once a profile is ready — the create flow hides it
 // directly, the second-device receive resolves, restore reloads the app.
 function showSplash() {
@@ -4640,6 +4641,7 @@ function showSplash() {
   el.className = "splash"; el.id = "splash";
   el.innerHTML = `
     <div class="splash-main">
+      <p class="splash-ver" data-splash-ver>…</p>
       <img class="splash-logo" src="./icons/v-logo.svg" alt="Velta logo">
       <h1 class="splash-title">Welcome to Velta</h1>
       <p class="splash-tag">End-to-end encrypted messaging built on Delta Chat — no phone number, no central server. Pick how to set up your profile:</p>
@@ -4666,6 +4668,7 @@ function showSplash() {
       <pre data-logpre></pre>
     </details>`;
   document.body.appendChild(el);
+  fillSplashVersion(el);
 
   const actionsEl = el.querySelector("[data-actions]");
   const formEl = el.querySelector("[data-form]");

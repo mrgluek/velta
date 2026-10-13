@@ -170,3 +170,10 @@ export function timeAgo(ts) {
   const years = Math.floor(days / 365);
   return `${years} year${years === 1 ? "" : "s"} ago`;
 }
+
+// #127: welcome splash version line. Tauri shells name Tauri; the browser
+// names the service-worker / app-shell cache instead.
+export function formatSplashVersion({ app, core, tauri, sw }) {
+  const shell = tauri ? `Tauri ${tauri}` : `service worker ${sw || "—"}`;
+  return `Velta ${app} (Chatmail core ${core}, ${shell})`;
+}
