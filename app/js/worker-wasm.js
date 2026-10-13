@@ -132,7 +132,12 @@ self.onmessage = async (e) => {
   } else if (d.type === "line" && dc) {
     dc.receive(d.line);
   } else if (d.type === "checkpoint") {
-    checkpoint().catch(() => {});
+    // Reply only after the rewrite finishes. A caller that does not wait
+    // can reload during removeEntry and boot an empty account.
+    checkpoint().then(
+      () => self.postMessage({ type: "checkpoint-done", id: d.id }),
+      (err) => self.postMessage({ type: "checkpoint-error", id: d.id, error: String(err?.message ?? err) }),
+    );
   } else if (d.type === "read-file") {
     try {
       const bytes = glue.vfs_read(d.path);

@@ -226,7 +226,7 @@ export class JsonRpcCore extends EventTarget {
     try { this.syncOnlyActive = localStorage.getItem("velta-sync-only-active") === "1"; } catch {}
     await this._startIo();
     this._pollEvents();
-    this.transport.checkpoint?.();
+    await this.transport.checkpoint?.().catch(() => {});
     return this;
   }
 
@@ -1779,7 +1779,7 @@ export class JsonRpcCore extends EventTarget {
     // struct and serde rejects it with "missing field `password`". Empty
     // server fields are omitted so chatmail autoconfig fills them in.
     await this._call("add_transport", accountId, { addr, password });
-    this.transport.checkpoint?.();
+    await this.transport.checkpoint?.().catch(() => {});
     this._emitAccount("chat-updated", { chatId: 0 }, accountEpoch);
   }
 
@@ -1788,7 +1788,7 @@ export class JsonRpcCore extends EventTarget {
     await this._callWithTimeout(180000, "set_config_from_qr", accountId, qrContent);
     // The account was unconfigured when init() started IO, so start it now.
     await this._call("start_io", accountId);
-    this.transport.checkpoint?.();
+    await this.transport.checkpoint?.().catch(() => {});
   }
 
   async startIo() {

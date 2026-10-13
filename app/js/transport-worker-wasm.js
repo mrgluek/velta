@@ -79,10 +79,24 @@ export class WorkerWasmTransport {
     });
   }
 
-  // Ask the worker to copy memfs → OPFS. Refresh kills the worker; the
-  // 8s interval alone never runs for that last session.
+  // Copy memfs → OPFS and resolve when that rewrite has finished.
+  // Do not flush from pagehide: that starts removeEntry and the browser
+  // then kills the worker, so the saved account is gone on the next load.
   checkpoint() {
-    this._worker?.postMessage({ type: "checkpoint" });
+    if (!this._worker) return Promise.resolve();
+    const id = ++this._fileSeq;
+    return new Promise((resolve, reject) => {
+      const onMsg = (e) => {
+        const d = e.data;
+        if (d.id !== id) return;
+        if (d.type !== "checkpoint-done" && d.type !== "checkpoint-error") return;
+        this._worker.removeEventListener("message", onMsg);
+        if (d.type === "checkpoint-error") reject(new Error(d.error || "checkpoint failed"));
+        else resolve();
+      };
+      this._worker.addEventListener("message", onMsg);
+      this._worker.postMessage({ type: "checkpoint", id });
+    });
   }
 
   async _boot() {
@@ -95,11 +109,6 @@ export class WorkerWasmTransport {
     if (!acquired) throw new Error("wasm core is already open in another tab");
     return new Promise((resolve, reject) => {
       const w = new Worker(this._workerUrl, { type: "module" });
-      const flush = () => w.postMessage({ type: "checkpoint" });
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") flush();
-      });
-      window.addEventListener("pagehide", flush);
       w.onmessage = (e) => {
         const d = e.data;
         if (d.type === "line") this._receiver?.(d.line);

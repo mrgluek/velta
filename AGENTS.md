@@ -67,7 +67,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   │   ├── rpc-core.js       # JsonRpcCore wrapper over transports + event mapping
 │   │   ├── transport.js      # backend auto-detection (Tauri, WebSocket, HTTP, mock)
 │   │   ├── transport-worker-wasm.js # wasm transport: hosts the core in a module worker; memfs file passthrough (readCoreFile/readCoreFileList/writeCoreFile), single-tab Web Locks gate
-│   │   ├── worker-wasm.js    # wasm worker: OPFS snapshot → memfs before core init (persist boot FAILS LOUDLY without OPFS — #106), checkpoint stages in memory before the destructive rewrite, serialized, also on page hide and after login; memfs file ops
+│   │   ├── worker-wasm.js    # wasm worker: OPFS snapshot → memfs before core init (persist boot FAILS LOUDLY without OPFS — #106), checkpoint stages in memory before the destructive rewrite, serialized, awaited after login; memfs file ops
 │   │   ├── identity-backup.js # V2.5 identity backup: bundle build/wrap/unwrap (WebCrypto), base64 helpers, backup download name (#104), gzipBytes/gunzipBytes (CompressionStream — returns input unchanged when unsupported; callers detect by identity to decide the .gz suffix)
 │   │   ├── ws-relays.js      # PWA websocket relay list; baked VELTA_PWA.wsProxyUrl until a domain is chosen; probeC3Relay (C3 capability probe)
 │   │   ├── webxdc-manager.js # webxdc host: opaque-origin sandboxed app overlay, shim postMessage relay, per-instance serials
@@ -373,10 +373,11 @@ Tauri still can't take over the transport. Gotchas (spike Day 19):
   OPFS is unavailable (boot-error, no silent empty boot → no stray account),
   and `checkpoint()` stages the snapshot in memory before the destructive
   `removeEntry` so a mid-walk throw can't wipe the stored snapshot.
-  One snapshot at a time (`checkpointChain`). The 8s interval is not enough
-  for a refresh: the transport also checkpoints after `init()` and after
-  `configureWithCredentials` / `configureWithQr`, and flushes on
-  `visibilitychange` hidden and `pagehide`. `acquireWasmLock` retries
+  One snapshot at a time (`checkpointChain`). The transport awaits a
+  checkpoint after `init()` and after `configureWithCredentials` /
+  `configureWithQr`, so the login is on disk before the UI continues.
+  Do not also flush on `pagehide`: that `removeEntry` runs as the browser
+  kills the worker and the next load finds an empty tree. `acquireWasmLock` retries
   `velta-wasm-core` for 1.5s so the dying page is not treated as a second
   tab. A tab that still holds the lock after that fails, and createCore can
   still land in the demo. A crash can drop the tail since the last snapshot.

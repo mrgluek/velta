@@ -34,12 +34,12 @@ test("acquireWasmLock gives up when another tab keeps the core", async () => {
   assert.equal(ok, false);
 });
 
-test("a refresh flushes the account snapshot and a boot checkpoints it", () => {
+test("a refresh does not delete the saved account on the way out", () => {
   const transport = readFileSync(new URL("../app/js/transport-worker-wasm.js", import.meta.url), "utf8");
   const rpc = readFileSync(new URL("../app/js/rpc-core.js", import.meta.url), "utf8");
   const worker = readFileSync(new URL("../app/js/worker-wasm.js", import.meta.url), "utf8");
-  assert.match(transport, /pagehide/);
-  assert.match(transport, /visibilityState === "hidden"/);
-  assert.match(rpc, /this\.transport\.checkpoint\?\.\(\)/);
-  assert.match(worker, /checkpointChain/);
+  assert.doesNotMatch(transport, /addEventListener\("pagehide"/);
+  assert.match(transport, /checkpoint-done/);
+  assert.match(rpc, /await this\.transport\.checkpoint\?\.\(\)/);
+  assert.match(worker, /checkpoint-done/);
 });
