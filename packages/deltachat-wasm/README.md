@@ -23,6 +23,17 @@ builds use a wasm-pack release whose bundled wasm-bindgen matches, otherwise
 the build fails with a version-mismatch error. Check with
 `wasm-pack --version` and `cargo install --list | grep wasm-bindgen-cli`.
 
+**Exports used by the PWA worker** (`app/js/worker-wasm.js`): `init`, the
+memfs `vfs_*` functions, and `sqlite_list` / `sqlite_export` /
+`sqlite_import`. SQLite runs in sqlite-wasm-rs's in-memory VFS, not the
+memfs, so the account databases are only saved through the `sqlite_*`
+calls (#123). Changing `Cargo.toml` makes the pinned locks stale: run
+`python3 tools/apply-wasm-core-patches.py refresh-lock --dest /tmp/velta-wasm-lock`
+and commit the refreshed locks. Local builds need
+`rustup toolchain install nightly-2026-08-01 --target wasm32-unknown-unknown`
+and clang, then
+`CC=clang rustup run nightly-2026-08-01 wasm-pack build ...` as above.
+
 Networking e2e (alice→bob through a local `ws-tcp-proxy`):
 
 ```sh

@@ -302,8 +302,10 @@ address.
 `--ws-proxy` when the page is served by the relay. An empty
 `window.VELTA_PWA.wsProxyUrl` uses the page hostname at boot. Move
 `app/.mimosa` out of the app tree before the build so hook state is not
-precached. The service worker is `velta-pwa-<12 hex>`. Reload the PWA
-after deploy. A baked proxy URL is only for a PWA hosted on a different
+precached. The wasm core must export `sqlite_export` (build refuses
+otherwise) or profiles lose their database on reload. The service worker
+is `velta-pwa-<12 hex>`; upload `sw.js` with the rest and check its
+VERSION changed. Open pages show an update toast; reload once. A baked proxy URL is only for a PWA hosted on a different
 origin, and that URL stays out of git.
 
 Create-account on a relay that has no `/dns/` of its own stays on this

@@ -67,7 +67,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   │   ├── rpc-core.js       # JsonRpcCore wrapper over transports + event mapping
 │   │   ├── transport.js      # backend auto-detection (Tauri, WebSocket, HTTP, mock)
 │   │   ├── transport-worker-wasm.js # wasm transport: hosts the core in a module worker; memfs file passthrough (readCoreFile/readCoreFileList/writeCoreFile), single-tab Web Locks gate
-│   │   ├── worker-wasm.js    # wasm worker: OPFS snapshot → memfs before core init (persist boot FAILS LOUDLY without OPFS — #106), checkpoint stages in memory before the destructive rewrite, serialized, awaited after login; memfs file ops
+│   │   ├── worker-wasm.js    # wasm worker: OPFS snapshot (memfs tree + SQLite dbs via sqlite_export/import) restored before core init (persist boot FAILS LOUDLY without OPFS — #106); numbered snap-<n> + `current` pointer written last (#123); serialized, awaited after login/restore; memfs file ops
 │   │   ├── identity-backup.js # V2.5 identity backup: bundle build/wrap/unwrap (WebCrypto), base64 helpers, backup download name (#104), gzipBytes/gunzipBytes (CompressionStream — returns input unchanged when unsupported; callers detect by identity to decide the .gz suffix)
 │   │   ├── ws-relays.js      # PWA websocket relay list; baked VELTA_PWA.wsProxyUrl until a domain is chosen; probeC3Relay (C3 capability probe)
 │   │   ├── webxdc-manager.js # webxdc host: opaque-origin sandboxed app overlay, shim postMessage relay, per-instance serials
@@ -149,9 +149,9 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 ├── docs/research/ws-relay-endpoints-probe.md      # external WS endpoints vs the C3 contract — chatmail.uk /ygg-ws = Yggdrasil peering, not a mail tunnel (10-09)
 ├── docs/research/wasm-patches/   # 10-patch wasm series (series.txt, VENDORED.md, pinned locks + PROVENANCE)
 ├── packages/deltachat-wasm/      # MPL wasm wrapper — README = local wasm-pack build + e2e recipes
-├── scripts/build-pwa.mjs         # C4 PWA dist builder (app/ + wasm assets + pwa-config.js + precache SW) — §4.2.1
+├── scripts/build-pwa.mjs         # C4 PWA dist builder (app/ + wasm assets + pwa-config.js + precache SW); refuses a wasm without sqlite_export unless --allow-no-db-persist — §4.2.1
 ├── scripts/relay-invite/         # invite-only signup: invite.py CGI (interstitial + claim) + invite-tool.py CLI + README (deploy/features/troubleshooting) — deployed to the private relay (§4.2.1 relay-list bullet)
-├── scripts/verify-pwa-dist.mjs   # PWA dist rig: 10 checks (boot, OPFS persist, SW, identity-backup surface)
+├── scripts/verify-pwa-dist.mjs   # PWA dist rig: 10 checks (boot, OPFS persist incl. sqlite/, SW, identity-backup surface)
 └── tools/                    # icon generation, WSL APK build/sign helpers,
                               serve-dev.py (no-cache static server for app/)
 ```
@@ -335,12 +335,15 @@ imports the demo core, and prod modules take the shared helpers from
 ### 4.2.1 PWA dist (Architecture C) — build + verify
 
 ```bash
-# wasm core assets: download a CI artifact (or wasm-pack, see
-# packages/deltachat-wasm/README.md) into build/wasm-dist
+# wasm core assets: a CI artifact from a "wasm-core (opt-in)" run AFTER
+# 643ee36 (it does not run on master pushes — dispatch it), or wasm-pack
+# (packages/deltachat-wasm/README.md), into build/wasm-dist
 gh run download <run-id> -n wasm-dist-no-opt -D build/wasm-dist
-# build the deployable dist → build/dist-pwa
+grep -c sqlite_export build/wasm-dist/deltachat_wasm.js   # must be > 0
+# build the deployable dist → build/dist-pwa (refuses a wasm without
+# sqlite_export; --allow-no-db-persist only for throwaway dists)
 node scripts/build-pwa.mjs [--ws-proxy wss://host/path] [--wasm-opt [BIN]]
-# verify in a real browser (7 checks; headless msedge via playwright)
+# verify in a real browser (10 checks; bundled chromium, then msedge/chrome)
 node scripts/verify-pwa-dist.mjs
 ```
 
@@ -357,6 +360,13 @@ Deploy-dist rules (10-09):
   WITHOUT the flag so the SW content hash covers the optimized bytes
   (28.4 → 17.7 MB on 1.4.62's wasm; 28.6 → 17.6 MB on the 2.63 wasm
   deployed 2026-10-11, SW `velta-pwa-c1075b34fbe7`).
+- Deploy steps (10-13): wasm with `sqlite_*` → optimize → build →
+  verify-pwa-dist (10 PASS) → upload the WHOLE dist including `sw.js` →
+  check the served `sw.js` VERSION changed. Clients pick it up on the next
+  load or foreground (`reg.update()`); a page that was already open gets
+  the "Velta was updated" toast and runs the new files after one reload.
+  Profiles created on dists before 643ee36 never had their dc.db saved —
+  recreate or identity-restore them once.
 
 Detection is runtime-only — `app.js` is shared by all three targets and
 never branches at build time: `window.VELTA_PWA` exists ONLY in the dist
@@ -371,17 +381,22 @@ Tauri still can't take over the transport. Gotchas (spike Day 19):
   Run timestamps are UTC, commit times +0300 — compare carefully.
   Since #106 (7c68ffd3) a persist-build worker REFUSES to answer RPC when
   OPFS is unavailable (boot-error, no silent empty boot → no stray account),
-  and `checkpoint()` stages the snapshot in memory before the destructive
-  `removeEntry` so a mid-walk throw can't wipe the stored snapshot.
-  One snapshot at a time (`checkpointChain`). The transport awaits a
-  checkpoint after `init()` and after `configureWithCredentials` /
-  `configureWithQr`, so the login is on disk before the UI continues.
-  Do not also flush on `pagehide`: that `removeEntry` runs as the browser
-  kills the worker and the next load finds an empty tree. `acquireWasmLock` retries
+  and `checkpoint()` stages the snapshot in memory first; a mid-walk throw
+  writes nothing. Since #123 (643ee36) each checkpoint writes a NEW
+  `snap-<n>/{accounts,sqlite}` and flips the `current` file last; older
+  generations (and the pre-643ee36 single `accounts/` tree, still restored
+  when `current` is missing) are removed only after the flip, and an
+  unchanged snapshot (sha256 digest) is skipped. One snapshot at a time
+  (`checkpointChain`). The transport awaits a checkpoint after `init()`,
+  `configureWithCredentials` / `configureWithQr`, and identity restore
+  awaits one before its reload (#126); it also checkpoints on
+  `visibilitychange` → hidden, which is safe now that a cut-off write is
+  ignored. `acquireWasmLock` retries
   `velta-wasm-core` for 1.5s so the dying page is not treated as a second
   tab. A tab that still holds the lock after that fails, and createCore can
   still land in the demo. A crash can drop the tail since the last snapshot.
-  Pinned by `tests/wasm-boot-order.test.mjs` and `tests/wasm-session.test.mjs`.
+  Pinned by `tests/wasm-boot-order.test.mjs`, `tests/wasm-session.test.mjs`,
+  `tests/wasm-opfs-snapshot.test.mjs` and `tests/pwa-update-and-restore.test.mjs`.
 - The verify rig's static server serves the dist from memory on purpose:
   per-request reads of the 28 MB wasm flaked connections under the SW-install
   burst (install fails → registration goes redundant).
@@ -491,6 +506,8 @@ Wasm mail in that dist (`tests/ws-relays.test.mjs`, `tests/wasm-blob-url.test.mj
   `velta-pwa-<12 hex>`: sha256 of each precache path plus that file's
   sha256, in precache order. Activate deletes every other cache name, so
   a redeploy must rewrite `VERSION` or browsers keep the old shell.
+  Assets are cache-first from the worker's own VERSION cache; navigations
+  are network-first (see "SW updates" below).
   Registration is `{ updateViaCache: 'none' }`. The drawer
   `[data-v="sw"]` matches `velta-vNN` and `velta-pwa-<12 hex>` and paints
   again on `navigator.serviceWorker.ready` (the drawer is built before the
@@ -1279,7 +1296,14 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   so hex in a display name or address is not part of the key. The block is
   the one whose address matches. No parsed key hashes the address (the
   element `addr`, or `addrOf`). Self has no core fingerprint (contact 1
-  errors), so that tile follows the address too. Chat list and chat head
+  errors), so that tile follows the address too. **Greyscale rule
+  (7ef758c):** a tile not backed by a real key — any contact without a
+  parsed fingerprint, or self with no address yet (profile not configured)
+  — is drawn in greyscale (`mono`, `monoFill` = luma grey, no color-name
+  captions) and the profile key row shows "—"; configured self stays in
+  color. `cachedFingerprintIsDerived(id)` tells components which; derived
+  entries are dropped on `setFingerprintSource` so they re-resolve after
+  configure / key arrival (`tests/avatar-mono.test.mjs`). Chat list and chat head
   pass `addr` when the contact has one. Same key, same tile on every shell.
 - **Profile sheet (`showChatInfo`) hydration contract**: the full contact
   (real avatar, bot flag, presence) is fetched whenever `chat.contact` is
