@@ -30,3 +30,10 @@ test("the wasm wrapper exports the database snapshot bindings", () => {
   const lib = src("packages/deltachat-wasm/rust/src/lib.rs");
   for (const f of ["sqlite_list", "sqlite_export", "sqlite_import"]) assert.match(lib, new RegExp(`pub fn ${f}\\(`));
 });
+
+test("the page saves when hidden and tells the user about a new version", () => {
+  const t = src("app/js/transport-worker-wasm.js");
+  assert.match(t, /visibilitychange[\s\S]{0,200}checkpoint\(\)/);
+  const app = src("app/js/app.js");
+  assert.match(app, /addEventListener\("velta-sw-updated"[\s\S]{0,300}toast\(/);
+});

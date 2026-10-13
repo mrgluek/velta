@@ -44,7 +44,7 @@ test("join deep link, claim flow, and reload resume are wired", () => {
 });
 
 test("relay side: claim CGI is single-use atomic and reuses the /new generator", () => {
-  const cgi = readFileSync(new URL("../../relay-invite/invite.py", import.meta.url), "utf8");
+  const cgi = readFileSync(new URL("../scripts/relay-invite/invite.py", import.meta.url), "utf8");
   assert.ok(cgi.includes("fcntl.flock(f, fcntl.LOCK_EX)"), "claim takes an exclusive lock");
   assert.ok(cgi.includes('inv["uses"] = inv.get("uses", 1) - 1'), "decrement inside the lock");
   assert.ok(cgi.includes("create_newemail_dict(read_config(CONFIG_PATH))"), "reuses the /new generator");

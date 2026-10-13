@@ -1,5 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+// Node 20 has no global localStorage (Node 22+ does); ChatView reads it.
+if (typeof globalThis.localStorage === "undefined") {
+  const m = new Map();
+  globalThis.localStorage = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), clear: () => m.clear() };
+}
 // #97 share-in: ChatView.receiveShare against the same stub DOM as
 // chat-account-isolation.test.mjs (only the surface ChatView touches).
 class Element {

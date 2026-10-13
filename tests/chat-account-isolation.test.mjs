@@ -1,5 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+// Node 20 has no global navigator (Node 21+) or localStorage (Node 22+);
+// ChatView reads both.
+if (typeof globalThis.navigator === "undefined") globalThis.navigator = {};
+if (typeof globalThis.localStorage === "undefined") {
+  const m = new Map();
+  globalThis.localStorage = { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k), clear: () => m.clear() };
+}
 import { setTimeout as sleep } from "node:timers/promises";
 
 // Only the DOM surface used by ChatView's lifecycle and the real modal helpers.
