@@ -69,6 +69,12 @@ type Config struct {
 	Key       string   `json:"key"` // server Ed25519 public key, standard base64
 	Resolvers []string `json:"resolvers"`
 	Canaries  []string `json:"canaries,omitempty"`
+	// ProbeTargets fixes the hosts the monitor TLS-probes to tell "direct
+	// works" from "allowlist on" (host:port, bare host = :443). Empty = learn
+	// them from the hostnames that pass through the proxy, which is right
+	// when only the mail core uses it; a proxy shared with a browser would
+	// learn allowlisted sites too and never see the block.
+	ProbeTargets []string `json:"probe_targets,omitempty"`
 	// SystemResolvers are the DNS servers the phone's current network handed
 	// out (the operator's on mobile data); Operator is the SIM's MCC+MNC.
 	// Both come from the app at start, never from a link.
@@ -160,24 +166,17 @@ func (c Config) Normalize() (Config, error) {
 	}
 	c.SystemResolvers = sys
 
-	var cs []string
-	for _, h := range c.Canaries {
-		h = strings.TrimSpace(h)
-		if h == "" {
-			continue
-		}
-		if _, _, err := net.SplitHostPort(h); err != nil {
-			h = net.JoinHostPort(h, "443") // bare host
-		}
-		cs = append(cs, h)
-	}
-	if len(cs) > 8 {
-		return Config{}, fmt.Errorf("too many canaries (%d, max 8)", len(cs))
+	cs, err := hostPorts(c.Canaries, "canaries")
+	if err != nil {
+		return Config{}, err
 	}
 	if len(cs) == 0 {
 		cs = append([]string(nil), DefaultCanaries...)
 	}
 	c.Canaries = cs
+	if c.ProbeTargets, err = hostPorts(c.ProbeTargets, "probe targets"); err != nil {
+		return Config{}, err
+	}
 	switch c.Mode {
 	case "":
 		c.Mode = ModeAuto
@@ -210,6 +209,25 @@ func (c Config) Effective() []string {
 	add(c.Resolvers)
 	add(DefaultResolvers)
 	return out
+}
+
+// hostPorts trims list entries, drops empty ones and gives a bare host port 443.
+func hostPorts(list []string, what string) ([]string, error) {
+	var out []string
+	for _, h := range list {
+		h = strings.TrimSpace(h)
+		if h == "" {
+			continue
+		}
+		if _, _, err := net.SplitHostPort(h); err != nil {
+			h = net.JoinHostPort(h, "443")
+		}
+		out = append(out, h)
+	}
+	if len(out) > 8 {
+		return nil, fmt.Errorf("too many %s (%d, max 8)", what, len(out))
+	}
+	return out, nil
 }
 
 func checkZone(z string) error {

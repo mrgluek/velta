@@ -17,6 +17,8 @@ tunnel link.
 | `velta-app/src-tauri/src/tunnel.rs` | Loads the library, stores `tunnel.json` in app-local data, sets `proxy_url` on every profile, Tauri commands |
 | `app/js/tunnel.js` | Deep link confirm, drawer row + settings sheet, diagnostics share |
 | `.github/workflows/build-android.yml` | Builds `libsoartunnel.so` into `gen/android/app/src/main/soarLibs` (gradle `jniLibs.srcDir`) |
+| `velta-app/soar-tunnel/cmd/libsoarhelper` | Same router as JNI methods of `org.velta.tunnelhelper.Native`, for the helper app (`//go:build android`) |
+| `velta-tunnel-helper/` | Test tool: standalone app, SOCKS5 on `127.0.0.1:42000` without auth (see "Tunnel helper app" below) |
 
 ## Configuration never lives in the repo
 
@@ -66,6 +68,12 @@ used when it starts with TLS (993, 465, 443) and on 443 for STARTTLS ports. All 
   the core reconnects at once.
 - **always** / **off**: fixed route.
 
+What the monitor probes: by default the hostnames that went through the
+proxy (in Velta only the core uses it, so those are the relays). A config with
+`probe_targets` (host or host:port, max 8) probes those hosts and stops
+learning: a proxy shared with a browser would learn allowlisted sites, which
+answer and hide the block. Velta itself does not set it.
+
 Switching `proxy_enabled` in the core instead was rejected: it restarts the
 IO scheduler on every flip and can't fall back per connection.
 
@@ -73,6 +81,20 @@ IO scheduler on every flip and can't fall back per connection.
 (prefix `socks5://velta-tunnel:`); a proxy the user set wins. A 60 s loop
 re-applies it so profiles added later pick it up. Removing the tunnel clears
 only our value.
+
+## Tunnel helper app
+
+`velta-tunnel-helper/` is a test tool, not a release: a foreground service
+that runs the router on `127.0.0.1:42000` without SOCKS5 auth, so stock
+Delta Chat or `curl` can test the tunnel. The user pastes the link in the
+app (app-private storage), so the APK and the CI artifact
+(`build-tunnel-helper.yml`, manual dispatch + PRs touching it) carry no
+tunnel identifiers. The user also enters the probe hosts (`probe_targets`).
+The service restarts the router when the network's DNS servers or the SIM
+operator change, the same way `tunnel.rs` does, and starts it again when a start
+failed. Android does not separate loopback traffic by app, so every app on
+the phone can use the port. The server's egress firewall limits the tunnel
+to the relays. Usage: `velta-tunnel-helper/README.md`.
 
 ## DNS interception
 

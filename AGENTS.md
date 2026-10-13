@@ -123,6 +123,8 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   ├── android/              # Gradle project; builds velta-core-service.apk
 │   └── README.md
 │
+├── velta-tunnel-helper/      # test tool: standalone Android app, DNS-tunnel SOCKS5 on 127.0.0.1:42000 (README.md; docs/agents/dns-tunnel.md)
+│
 ├── deltachat-backend/        # Prebuilt deltachat-rpc-server binaries
 │   ├── windows-x86_64/
 │   └── android-arm64/

@@ -1,0 +1,72 @@
+name: Build tunnel helper APK
+
+# Test tool, not a release: velta-tunnel-helper/ (SOCKS5 on 127.0.0.1:42000
+# over the DNS tunnel). Never part of release.yml. The APK carries no tunnel
+# link — the user pastes it in the app — so the artifact is safe to share.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - velta-tunnel-helper/**
+      - velta-app/soar-tunnel/**
+      - .github/workflows/build-tunnel-helper.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK / NDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
+        with:
+          cmdline-tools-version: 11076708
+          packages: "ndk;27.2.12479018 platforms;android-36 build-tools;35.0.0"
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: velta-app/soar-tunnel/go.mod
+          cache-dependency-path: velta-app/soar-tunnel/go.sum
+
+      - name: Build libsoarhelper.so (arm64-v8a)
+        working-directory: ./velta-app/soar-tunnel
+        run: |
+          go vet ./...
+          go test ./...
+          NDK="$ANDROID_HOME/ndk/27.2.12479018/toolchains/llvm/prebuilt/linux-x86_64"
+          OUT=../../velta-tunnel-helper/app/src/main/soarLibs/arm64-v8a
+          mkdir -p "$OUT"
+          # 16 KB page alignment: required for native libs on Android 15+ devices.
+          CGO_ENABLED=1 GOOS=android GOARCH=arm64 CC="$NDK/bin/aarch64-linux-android24-clang" \
+            go build -trimpath -buildmode=c-shared \
+            -ldflags="-s -w -extldflags=-Wl,-z,max-page-size=16384" \
+            -o "$OUT/libsoarhelper.so" ./cmd/libsoarhelper
+          rm -f "$OUT/libsoarhelper.h"
+          ls -l "$OUT"
+
+      - name: Build APK
+        working-directory: ./velta-tunnel-helper
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Name the APK
+        run: |
+          mkdir -p dist
+          cp velta-tunnel-helper/app/build/outputs/apk/release/app-release.apk \
+            "dist/velta-tunnel-helper-${GITHUB_SHA::8}-arm64.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: velta-tunnel-helper
+          path: dist/*.apk
