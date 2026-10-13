@@ -5,10 +5,12 @@
 //   invites.js
 //   "- item" / "* item" bullets and "1." / "1)" numbered lists
 // All text is HTML-escaped before any tag is produced; only http(s) URLs
-// become links, so message content can never inject markup. There is no code
+// become links (bare velta://tunnel setup links become a card), so message content can
+// never inject markup. There is no code
 // span/block syntax, so nothing is excluded from linking on that account.
 import { escapeHtml, escapeAttr } from "./components.js";
 import { findBareLinks, trimLinkEnd } from "./bare-links.js";
+import { tunnelCardHtml } from "./tunnel.js";
 import { parseInviteLink, inviteCardHtml, isShortInviteLink, shortInviteCardHtml } from "./invites.js";
 
 const PLACEHOLDER_RE = /\x00(\d+)\x00/g;
@@ -80,11 +82,13 @@ export function renderMarkdown(rawText) {
 // which are turned into the very same https anchors / invite cards.
 function inline(raw) {
   raw = raw.replace(/\x00/g, ""); // NUL delimits placeholders below
-  const re = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]*)\)|\bhttps?:\/\/[^\s<]+/gi;
+  const re = /\[([^\]\n]+)\]\((https?:\/\/[^)\s]*)\)|\b(?:https?:\/\/|velta:\/\/tunnel(?=[?#/]|$|\s))[^\s<]+/gi;
   const anchors = [];
   const hold = token => { anchors.push(token); return `\x00${anchors.length - 1}\x00`; };
   const linkToken = (url, label) => {
     const invite = parseInviteLink(url);
+    // velta://tunnel setup links render as a card (app.js handles its buttons).
+    if (/^velta:\/\/tunnel/i.test(url)) return tunnelCardHtml(url) ?? escapeHtml(label);
     return invite ? inviteCardHtml(invite)
       : isShortInviteLink(url) ? shortInviteCardHtml(url)
       : `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;

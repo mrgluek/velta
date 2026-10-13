@@ -3891,6 +3891,22 @@ async function handleDeeplink() {
 // Runtime URL changes (e.g. user navigates to an invite link in the webview)
 addEventListener("hashchange", () => handleDeeplink());
 
+// Buttons of the DNS tunnel card in a message (tunnel.js tunnelCardHtml).
+// Capture phase, like the invite cards: the row click handler never sees them.
+document.addEventListener("click", e => {
+  const copy = e.target.closest?.("[data-tunnel-copy]");
+  const open = e.target.closest?.("[data-tunnel-open]");
+  if (!copy && !open) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (copy) {
+    navigator.clipboard?.writeText(copy.getAttribute("data-tunnel-copy"))?.then?.(() => toast("Tunnel link copied"));
+    return;
+  }
+  const url = open.getAttribute("data-tunnel-open");
+  if (extractTunnelLink(url)) handleDeeplinkFromUrl(url);
+}, true);
+
 // #97 share-in. Android hands over ACTION_SEND/SEND_MULTIPLE as opened urls
 // (tao: text -> data:text/plain or a URL, files -> content://); Windows Send
 // to passes file paths. One picker per burst (several photos arrive as one

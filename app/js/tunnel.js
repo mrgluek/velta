@@ -35,6 +35,35 @@ export function extractTunnelLink(rawUrl) {
   return /^velta:\/\/tunnel(?:[?#/]|$)/i.test(s) ? s : null;
 }
 
+/** Zone and resolver count of a tunnel link for the message card, or null.
+ * The key is deliberately never returned: it must not reach the page text. */
+export function tunnelCardInfo(link) {
+  if (!extractTunnelLink(link)) return null;
+  const q = String(link).split("#")[0].split("?")[1] || "";
+  const params = new URLSearchParams(q);
+  const zone = (params.get("zone") || "").trim();
+  if (!zone) return null;
+  const resolvers = (params.get("r") || "").split(",").filter(x => x.trim()).length;
+  return { zone, resolvers };
+}
+
+/** Card shown in a message bubble instead of a raw velta://tunnel link. The
+ * main button asks to enable (app.js, confirms first); the icon copies. */
+export function tunnelCardHtml(link) {
+  const info = tunnelCardInfo(link);
+  if (!info) return null;
+  const sub = info.resolvers ? `${info.zone} · ${info.resolvers} resolver${info.resolvers === 1 ? "" : "s"}` : info.zone;
+  return `<span class="invite-card tunnel-card">` +
+    `<button type="button" class="invite-main" data-tunnel-open="${esc(link)}">` +
+      `<span class="invite-line"><b>DNS tunnel</b> setup link</span>` +
+      `<span class="invite-sub">${esc(sub)}</span>` +
+    `</button>` +
+    `<button type="button" class="invite-copy" data-tunnel-copy="${esc(link)}" title="Copy tunnel link" aria-label="Copy tunnel link">` +
+      `<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a2 2 0 012-2h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>` +
+    `</button>` +
+  `</span>`;
+}
+
 /** Last known status (sync, for drawer rendering). */
 export function tunnelInstalled() {
   return !!cached.installed;
