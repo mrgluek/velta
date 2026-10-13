@@ -496,8 +496,8 @@ html[data-theme="light"] .read-marker { color: #155a9e; border-color: #155a9e; }
    .msg-text and inserts .msg-select-bar). Desktop keeps native mouse
    selection — hence the media gate. */
 @media (hover: none) and (pointer: coarse) {
-  .bubble, .bubble .msg-text { -webkit-user-select: none; user-select: none; }
-  .bubble .msg-text.text-selecting { -webkit-user-select: text; user-select: text; }
+  .bubble, .bubble .msg-text { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .bubble .msg-text.text-selecting { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
 }
 .msg-select-bar {
   display: flex; flex-wrap: wrap; gap: 6px;

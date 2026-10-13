@@ -1071,6 +1071,33 @@ test("a click right after a swipe-back drag that began on a link does not open i
   assert.deepEqual(opened, []);
 });
 
+test("long-press text selection waits for Select text", async t => {
+  const { view } = setup(t);
+  await view.open(7);
+  mobileGestures(t, true);
+  const row = view._buildItem(view.msgIndex.get(10));
+  const bubble = document.createElement("div");
+  bubble.className = "bubble";
+  const text = document.createElement("div");
+  text.className = "msg-text";
+  text.textContent = "hello";
+  bubble.append(text);
+  row.append(bubble);
+  let prevented = 0;
+  const ev = () => ({ preventDefault() { prevented++; } });
+  await row.fire("selectstart", ev());
+  assert.equal(prevented, 1);
+  view._enterBubbleTextSelection(row);
+  prevented = 0;
+  await row.fire("selectstart", ev());
+  assert.equal(prevented, 0);
+  view._leaveTextSelection();
+  globalThis.matchMedia = (q) => ({ matches: q === "(hover: hover) and (pointer: fine)" });
+  prevented = 0;
+  await row.fire("selectstart", ev());
+  assert.equal(prevented, 0);
+});
+
 test("inline message links are not natively draggable but text stays selectable", async () => {
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../app/css/main.css", import.meta.url), "utf8");

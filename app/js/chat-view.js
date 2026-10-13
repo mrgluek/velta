@@ -1909,6 +1909,13 @@ export class ChatView {
       };
     }
 
+    row.addEventListener("selectstart", e => {
+      // #121: long-press starts a native selection beside the message menu.
+      // Touch blocks it until Select text. A fine pointer keeps mouse selection.
+      if (this._textSelect?.row === row) return;
+      if (!this._offerSelectText()) return;
+      e.preventDefault();
+    });
     row.addEventListener("contextmenu", e => {
       // Alt+right-click passes through to the WebView default menu
       // (Inspect / devtools) for debugging.
