@@ -35,6 +35,8 @@ test("top native controls are wired", () => {
   assert.match(chat, /<progress class="mfp-bar"/);
   assert.match(chat, /field-sizing/);
   assert.match(css, /field-sizing:\s*content/);
+  assert.match(html, /id="btn-new-chat"/);
+  assert.match(css, /\.bar-btn\.bar-accent\.active \{ border-radius: 8px; \}/);
   assert.match(ui, /role="switch"/);
   assert.match(app, /minlength="6"/);
 });

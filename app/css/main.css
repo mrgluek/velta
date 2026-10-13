@@ -232,6 +232,8 @@ svg { width: 24px; height: 24px; display: block; }
 }
 .bar-btn.active { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); border-radius: 8px 8px 0 0; }
 .bar-btn.bar-accent { background: var(--accent); color: #f4f4f4; }
+/* #109: .bar-btn.active squares the bottom corners for the view tabs. The + is not a tab. */
+.bar-btn.bar-accent.active { border-radius: 8px; }
 @media (hover: hover) and (pointer: fine) {
   .bar-btn.bar-accent:hover { transform: scale(1.05); }
 }
