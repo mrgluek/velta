@@ -62,7 +62,12 @@ the router decides per connection:
 used when it starts with TLS (993, 465, 443) and on 443 for STARTTLS ports. All relays failing
   while any canary answers twice in a row = blocked → TUNNEL; a relay
   answering directly three times = back to DIRECT; nothing answering =
-  offline, no change. A route switch closes the old route's connections so
+  offline, no change. Before that switch the same relays are TLS-probed
+  through the tunnel: if a live soar session can't reach any of them
+  either, they are down, not blocked (one profile with one dead relay
+  looks exactly like an allowlist), so the route stays DIRECT with state
+  `relays-down`, rechecked every minute. Without a live session the
+  check proves nothing and the switch goes ahead. A route switch closes the old route's connections so
   the core reconnects at once.
 - **always** / **off**: fixed route.
 
