@@ -26,6 +26,19 @@ test("known trackers drop and real params stay", () => {
   assert.equal(stripTrackingUrl("openpgp4fpr:" + fp), "openpgp4fpr:" + fp);
 });
 
+test("click ids, host extras, and trailing punctuation", () => {
+  assert.equal(stripTrackingUrl("https://example.com/a?fbclid=1&gclid=2&id=3"), "https://example.com/a?id=3");
+  assert.equal(stripTrackingUrl("https://shop.example/p?hsa_cam=1&sku=9"), "https://shop.example/p?sku=9");
+  assert.equal(stripTrackingUrl("https://open.spotify.com/track/1?si=abc"), "https://open.spotify.com/track/1");
+  assert.equal(stripTrackingUrl("https://x.com/a/status/1?ref_src=tw&id=9"), "https://x.com/a/status/1?id=9");
+  assert.equal(stripTrackingUrl("https://www.amazon.co.uk/dp/1?linkCode=ok&th=1"), "https://www.amazon.co.uk/dp/1?th=1");
+  assert.equal(stripTrackingUrl("https://example.com/?id=1"), "https://example.com/?id=1");
+  setTrackingStripEnabled(true);
+  const pasted = stripTrackingText("see https://example.com/?utm_source=x&id=1. and https://example.com/plain");
+  assert.equal(pasted.changed, true);
+  assert.equal(pasted.text, "see https://example.com/?id=1. and https://example.com/plain");
+});
+
 test("paste rewrite follows the drawer switch", () => {
   setTrackingStripEnabled(true);
   assert.equal(trackingStripEnabled(), true);
