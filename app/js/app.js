@@ -3891,6 +3891,12 @@ async function handleDeeplink() {
 // Runtime URL changes (e.g. user navigates to an invite link in the webview)
 addEventListener("hashchange", () => handleDeeplink());
 
+// A velta://tunnel link clicked inside a message (chat-view dispatches it).
+document.addEventListener("velta-open-link", e => {
+  const url = e.detail?.url;
+  if (extractTunnelLink(url)) handleDeeplinkFromUrl(url);
+});
+
 // #97 share-in. Android hands over ACTION_SEND/SEND_MULTIPLE as opened urls
 // (tao: text -> data:text/plain or a URL, files -> content://); Windows Send
 // to passes file paths. One picker per burst (several photos arrive as one
