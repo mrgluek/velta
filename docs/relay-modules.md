@@ -301,7 +301,7 @@ address.
 **PWA.** Build with `node scripts/build-pwa.mjs` and do not pass
 `--ws-proxy` when the page is served by the relay. An empty
 `window.VELTA_PWA.wsProxyUrl` uses the page hostname at boot. Move
-`app/.mimosa` out of the app tree before the build so hook state is not
+`app/.mimosa` and `app/js/.mimosa` out of the app tree before the build so hook state is not
 precached. The wasm core must export `sqlite_export` (build refuses
 otherwise) or profiles lose their database on reload. The service worker
 is `velta-pwa-<12 hex>`; upload `sw.js` with the rest and check its

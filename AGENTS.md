@@ -359,9 +359,10 @@ Deploy-dist rules (10-09):
   `node tools/binaryen/node_modules/binaryen/bin/wasm-opt -Os
   build/wasm-dist/deltachat_wasm_bg.wasm -o <same file>` → then build
   WITHOUT the flag so the SW content hash covers the optimized bytes
-  (28.4 → 17.7 MB on 1.4.62's wasm; 28.6 → 17.6 MB on the 2.63 wasm
-  deployed 2026-10-11, SW `velta-pwa-c1075b34fbe7`).
-- Deploy steps (10-13): wasm with `sqlite_*` → optimize → build →
+  (28.4 → 17.7 MB on 1.4.62's wasm; 28.7 → 16.8 MB on the 2.63 wasm
+  deployed 2026-10-14, SW `velta-pwa-eb6778201c55`, CI run 38485201436).
+- Deploy steps (10-13): wasm with `sqlite_*` → optimize → move
+  `app/.mimosa` and `app/js/.mimosa` out → build (no `--ws-proxy`) →
   verify-pwa-dist (10 PASS) → upload the WHOLE dist including `sw.js` →
   check the served `sw.js` VERSION changed. Clients pick it up on the next
   load or foreground (`reg.update()`); a page that was already open gets
