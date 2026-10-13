@@ -80,8 +80,8 @@ export class WorkerWasmTransport {
   }
 
   // Copy memfs → OPFS and resolve when that rewrite has finished.
-  // Do not flush from pagehide: that starts removeEntry and the browser
-  // then kills the worker, so the saved account is gone on the next load.
+  // Each checkpoint writes a new snapshot generation and flips `current`
+  // last, so a worker killed mid-write keeps the previous one (#123).
   checkpoint() {
     if (!this._worker) return Promise.resolve();
     const id = ++this._fileSeq;
@@ -124,6 +124,11 @@ export class WorkerWasmTransport {
       };
       w.postMessage({ type: "boot", glueUrl: this._glueUrl, wsProxyUrl: this._wsProxyUrl });
       this._worker = w;
+      // Save when the page goes to the background (tab switch, app switch,
+      // the start of a reload). Safe now that a cut-off write is ignored.
+      globalThis.document?.addEventListener?.("visibilitychange", () => {
+        if (globalThis.document.visibilityState === "hidden") this.checkpoint().catch(() => {});
+      });
     });
   }
 }

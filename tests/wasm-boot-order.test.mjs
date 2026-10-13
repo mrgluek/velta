@@ -93,7 +93,7 @@ test("boot fails loudly when OPFS is unavailable — no core init, no stray acco
   assert.ok(!globalThis.__glue.order.includes("init"), "core must not init without its snapshot");
 });
 
-test("checkpoint stages the snapshot before the destructive removeEntry", async () => {
+test("checkpoint stages the snapshot before it touches OPFS", async () => {
   const opfs = fakeOpfs();
   const w = loadWorker({ storage: { getDirectory: async () => opfs.root } });
   await w.boot({ persist: true });
@@ -102,10 +102,12 @@ test("checkpoint stages the snapshot before the destructive removeEntry", async 
   w.msg({ type: "checkpoint" });
   await new Promise(r => setTimeout(r, 20));
   assert.equal(opfs.calls.removeEntry, 0, "walk failure must not wipe OPFS");
+  assert.equal(opfs.calls.written.length, 0, "nor write a half snapshot");
 
   globalThis.__glue.failList = false;
   w.msg({ type: "checkpoint" });
   await new Promise(r => setTimeout(r, 20));
-  assert.equal(opfs.calls.removeEntry, 1);
-  assert.equal(opfs.calls.written.length, 1, "a.toml rewritten");
+  // #123: a new generation (a.toml) and then the `current` pointer.
+  assert.equal(opfs.calls.written.length, 2, "a.toml + current");
+  assert.equal(new TextDecoder().decode(opfs.calls.written[1]), "1");
 });

@@ -76,6 +76,52 @@ pub async fn vfs_list(path: String) -> Result<js_sys::Array, JsValue> {
     Ok(arr)
 }
 
+// SQLite does not live in the memfs: rusqlite on wasm32 opens every
+// database in sqlite-wasm-rs's in-memory VFS. Without these bindings the
+// OPFS snapshot saved only accounts.toml and the blob dirs, so a reload came
+// back with the account listed but its dc.db empty (unconfigured) — #123/#126.
+type MemVfs = sqlite_wasm_rs::MemVfsUtil<sqlite_wasm_rs::WasmOsCallback>;
+
+fn is_db_side_file(name: &str) -> bool {
+    name.ends_with("-journal") || name.ends_with("-wal") || name.ends_with("-shm")
+}
+
+/// Main database files currently held by the in-memory SQLite VFS.
+#[wasm_bindgen]
+pub fn sqlite_list() -> js_sys::Array {
+    let arr = js_sys::Array::new();
+    for name in MemVfs::new().list() {
+        if !is_db_side_file(&name) {
+            arr.push(&JsValue::from_str(&name));
+        }
+    }
+    arr
+}
+
+/// Bytes of one in-memory database (consistent between JS turns: a
+/// transaction never spans an await on the single-threaded worker).
+#[wasm_bindgen]
+pub fn sqlite_export(name: String) -> Result<js_sys::Uint8Array, JsValue> {
+    let bytes = MemVfs::new()
+        .export_db(&name)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+    Ok(js_sys::Uint8Array::from(bytes.as_slice()))
+}
+
+/// Put a saved database back before core init opens it.
+#[wasm_bindgen]
+pub fn sqlite_import(name: String, data: &[u8]) -> Result<(), JsValue> {
+    let util = MemVfs::new();
+    util.delete_db(&name);
+    match util.import_db(&name, data) {
+        Ok(()) => Ok(()),
+        // Not a plain SQLite header (SQLCipher): keep the bytes as they are.
+        Err(_) => util
+            .import_db_unchecked(&name, data, 4096)
+            .map_err(|e| JsValue::from_str(&e.to_string())),
+    }
+}
+
 #[wasm_bindgen]
 pub struct DeltaChat {
     session: RpcSession<CommandApi>,

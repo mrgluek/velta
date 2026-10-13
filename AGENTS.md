@@ -495,6 +495,25 @@ Wasm mail in that dist (`tests/ws-relays.test.mjs`, `tests/wasm-blob-url.test.mj
   `[data-v="sw"]` matches `velta-vNN` and `velta-pwa-<12 hex>` and paints
   again on `navigator.serviceWorker.ready` (the drawer is built before the
   cache exists). `app/diag.html` still parses only `velta-v\d+`.
+- **OPFS snapshot layout (#123/#126, 10-13).** SQLite does NOT live in the
+  memfs: rusqlite on wasm32 keeps every db in sqlite-wasm-rs's memory VFS,
+  so the old memfs-only snapshot saved accounts.toml and never dc.db (every
+  reload = unconfigured profile). The wrapper exports `sqlite_list` /
+  `sqlite_export` / `sqlite_import`; the worker writes
+  `snap-<n>/{accounts,sqlite}` and flips the `current` file last, pruning
+  older generations only after the flip (a reload mid-write keeps the last
+  complete one; legacy `accounts/` is still restored). `build-pwa.mjs`
+  refuses a wasm without `sqlite_export` (`--allow-no-db-persist` to
+  override). The transport checkpoints on `visibilitychange` → hidden;
+  identity restore awaits a checkpoint before its reload. `read-file`
+  falls back to `sqlite_export`, so the backup password fallback can read
+  dc.db.
+- **SW updates (10-13).** Install precaches with `cache: 'reload'` (a host
+  with max-age otherwise filled the new VERSION with old files — reproduced
+  headless); navigations are network-first with the precached
+  `index.html` as the offline fallback; pwa-config calls `reg.update()` when
+  the page becomes visible and fires `velta-sw-updated` (app toast) when a
+  new worker takes over an open page.
 - **Identity backup password.** `mailLoginForBackup` prefers
   `listTransports()` (`password`, else `imap.password`, else `imap_password`)
   for the sending address when that row has a password, else the first row

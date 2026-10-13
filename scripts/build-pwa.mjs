@@ -63,6 +63,12 @@ if (wasmOpt) {
   const bin = wasmOpt === true ? 'wasm-opt' : wasmOpt
   execFileSync(bin, ['-Os', join(outDir, 'wasm', 'deltachat_wasm_bg.wasm'), '-o', join(outDir, 'wasm', 'deltachat_wasm_bg.wasm')], { stdio: 'inherit' })
 }
+// #123: a wasm core without the sqlite_* bindings saves accounts.toml but
+// never the databases, so every reload comes back unconfigured.
+if (!readFileSync(join(outDir, 'wasm', 'deltachat_wasm.js'), 'utf8').includes('sqlite_export') && !args.includes('--allow-no-db-persist')) {
+  console.error('FAIL: this wasm core cannot save its databases (no sqlite_export) — rebuild it from packages/deltachat-wasm, or pass --allow-no-db-persist for a throwaway dist')
+  process.exit(2)
+}
 const wasmBytes = statSync(join(outDir, 'wasm', 'deltachat_wasm_bg.wasm')).size
 
 // 3. index.html: relax the shell CSP for the PWA (wasm instantiation + worker
@@ -99,7 +105,17 @@ window.VELTA_PWA = {
   wsProxyUrl: ${JSON.stringify(wsProxy)}, // ws(s):// mail proxy (C3 websockify); "" until the relay ships it
 };
 if ('serviceWorker' in navigator) {
-  addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {}));
+  // An installed PWA is resumed, not navigated, so the browser rarely checks
+  // for a new sw.js on its own: ask again whenever the page comes back.
+  // A new worker takes over at once (skipWaiting + claim); the page that was
+  // already open still runs the old files, so tell the user to reload.
+  const hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController) dispatchEvent(new CustomEvent('velta-sw-updated'));
+  });
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).then((reg) => {
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+  }).catch(() => {}));
 }
 `)
 
@@ -120,7 +136,12 @@ writeFileSync(join(outDir, 'sw.js'), `// Velta PWA service worker — precache-t
 const VERSION = 'velta-pwa-${hash.digest('hex').slice(0, 12)}'
 const PRECACHE = ${JSON.stringify(files, null, 2)};
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(PRECACHE)).then(() => self.skipWaiting()));
+  // cache: 'reload' skips the HTTP cache: a host that sends max-age on the
+  // app files would otherwise fill the NEW cache with the OLD files, and the
+  // deploy would never reach the page even though VERSION changed.
+  e.waitUntil(caches.open(VERSION)
+    .then((c) => c.addAll(PRECACHE.map((u) => new Request(u, { cache: 'reload' }))))
+    .then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys()
@@ -135,7 +156,15 @@ self.addEventListener('fetch', (e) => {
     e.respondWith(serveAccountBlob(e, url.searchParams.get('p')));
     return;
   }
-  e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request)));
+  // The page itself goes to the network first, so a redeploy shows up on
+  // the next load; offline it falls back to the precached shell.
+  if (e.request.mode === 'navigate') {
+    e.respondWith(fetch(e.request, { cache: 'no-cache' })
+      .then((r) => (r.ok ? r : caches.match('index.html', { ignoreSearch: true }).then((hit) => hit || r)))
+      .catch(() => caches.match('index.html', { ignoreSearch: true }).then((hit) => hit || Response.error())));
+    return;
+  }
+  e.respondWith(caches.open(VERSION).then((c) => c.match(e.request)).then((hit) => hit || fetch(e.request)));
 });
 // Notification tap (PWA): focus an in-scope client and hand it the chat
 // target; if none exists, open one and stash the click until that page
@@ -162,6 +191,10 @@ self.addEventListener('notificationclick', (e) => {
   })());
 });
 self.addEventListener('message', (e) => {
+  if (e.data && e.data.type === 'velta-sw-version') {
+    e.source.postMessage({ type: 'velta-sw-version', version: VERSION });
+    return;
+  }
   if (e.data && e.data.type === 'velta-pending-notification' && pendingClick) {
     e.source.postMessage(pendingClick);
     pendingClick = null;

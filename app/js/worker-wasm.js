@@ -41,30 +41,70 @@ async function opfsRoot() {
   }
 }
 
-// OPFS snapshot → memfs, before core init (restore survives even a core that
-// never gets to boot — it only needs the module-level vfs_* bindings).
-async function restore(root) {
-  const walk = async (dir, prefix) => {
-    for await (const [name, handle] of dir.entries()) {
-      const p = `${prefix}/${name}`;
-      if (handle.kind === "directory") {
-        await walk(handle, p);
-      } else {
-        const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
-        glue.vfs_mkdirp(p.slice(0, p.lastIndexOf("/")) || "/");
-        glue.vfs_write(p, bytes);
-      }
-    }
-  };
-  await walk(root, "");
+// OPFS layout (#123/#126):
+//   snap-<n>/accounts/...   memfs tree (accounts.toml, blob dirs)
+//   snap-<n>/sqlite/<enc>   in-memory SQLite databases (dc.db lives there,
+//                           NOT in the memfs — see the wrapper's sqlite_*)
+//   current                 text "<n>" — written last, so a snapshot only
+//                           counts once it is complete
+// Older builds kept a single accounts/ tree that every checkpoint deleted
+// and rewrote; a reload during that window booted an empty profile, and the
+// databases were never saved at all. Legacy accounts/ is still restored when
+// no `current` exists.
+const encName = (n) => encodeURIComponent(n);
+const decName = (n) => decodeURIComponent(n);
+
+async function readText(dir, name) {
+  try { return await (await (await dir.getFileHandle(name)).getFile()).text(); } catch { return null; }
 }
 
-// memfs /accounts → OPFS. Full rewrite of the snapshot so deletions and
-// renames between checkpoints propagate on the next restore. The snapshot is
-// staged in memory first: removeEntry must not run unless the memfs walk
-// fully succeeded, or a mid-walk throw would leave OPFS wiped (#106).
+async function writeFile(dir, name, bytes) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  const w = await fh.createWritable();
+  await w.write(bytes);
+  await w.close();
+}
+
+async function restoreTree(dir, prefix) {
+  for await (const [name, handle] of dir.entries()) {
+    const p = `${prefix}/${name}`;
+    if (handle.kind === "directory") {
+      await restoreTree(handle, p);
+    } else {
+      const bytes = new Uint8Array(await (await handle.getFile()).arrayBuffer());
+      glue.vfs_mkdirp(p.slice(0, p.lastIndexOf("/")) || "/");
+      glue.vfs_write(p, bytes);
+    }
+  }
+}
+
+let generation = 0;
+
+// OPFS snapshot → memfs + sqlite, before core init.
+async function restore(root) {
+  const cur = Number.parseInt(await readText(root, "current") || "", 10);
+  if (Number.isFinite(cur) && cur > 0) {
+    const snap = await root.getDirectoryHandle(`snap-${cur}`);
+    generation = cur;
+    try { await restoreTree(await snap.getDirectoryHandle("accounts"), "/accounts"); } catch (e) { if (e?.name !== "NotFoundError") throw e; }
+    let dbs = null;
+    try { dbs = await snap.getDirectoryHandle("sqlite"); } catch {}
+    if (dbs) {
+      if (typeof glue.sqlite_import !== "function") throw new Error("this wasm core cannot restore databases");
+      for await (const [name, handle] of dbs.entries()) {
+        if (handle.kind !== "file") continue;
+        glue.sqlite_import(decName(name), new Uint8Array(await (await handle.getFile()).arrayBuffer()));
+      }
+    }
+    return;
+  }
+  let legacy = null;
+  try { legacy = await root.getDirectoryHandle("accounts"); } catch {}
+  if (legacy) await restoreTree(legacy, "/accounts");
+}
+
 // One snapshot at a time. A refresh flush and the interval must not both
-// removeEntry the OPFS tree.
+// write a generation.
 let checkpointChain = Promise.resolve();
 function checkpoint() {
   const run = checkpointChain.then(snapshot, snapshot);
@@ -72,32 +112,63 @@ function checkpoint() {
   return run;
 }
 
+let lastDigest = "";
+
+// Collect memfs + databases, then write them into a NEW generation directory
+// and flip `current`. The previous generation stays intact until the flip, so
+// a reload or a killed worker at any point leaves a complete snapshot behind.
 async function snapshot() {
   const root = await opfsRoot();
   if (!root || !glue) return;
   const files = [];
   const walk = async (path) => {
     for (const entry of await glue.vfs_list(path)) {
-      if (entry.endsWith("/")) {
-        await walk(entry);
-      } else {
-        files.push({ path: entry, bytes: glue.vfs_read(entry) });
-      }
+      if (entry.endsWith("/")) await walk(entry);
+      else files.push({ path: entry, bytes: glue.vfs_read(entry) });
     }
   };
   await walk("/accounts");
-  try { await root.removeEntry("accounts", { recursive: true }); } catch {}
+  const dbs = [];
+  if (typeof glue.sqlite_list === "function") {
+    // Synchronous on purpose: no await between exports, so the databases
+    // are captured at one point of the core's timeline.
+    for (const name of glue.sqlite_list()) dbs.push({ name, bytes: glue.sqlite_export(name) });
+  }
+  const digest = await digestOf(files, dbs);
+  if (digest === lastDigest) return;
+  const next = generation + 1;
+  // A worker killed mid-write can leave a partial snap-<next>; start clean.
+  try { await root.removeEntry(`snap-${next}`, { recursive: true }); } catch {}
+  const snap = await root.getDirectoryHandle(`snap-${next}`, { create: true });
   for (const f of files) {
     const parts = f.path.split("/").filter(Boolean);
-    let dir = root;
-    for (let i = 0; i < parts.length - 1; i++) {
-      dir = await dir.getDirectoryHandle(parts[i], { create: true });
-    }
-    const fh = await dir.getFileHandle(parts[parts.length - 1], { create: true });
-    const w = await fh.createWritable();
-    await w.write(f.bytes);
-    await w.close();
+    let dir = snap;
+    for (let i = 0; i < parts.length - 1; i++) dir = await dir.getDirectoryHandle(parts[i], { create: true });
+    await writeFile(dir, parts[parts.length - 1], f.bytes);
   }
+  if (dbs.length) {
+    const dir = await snap.getDirectoryHandle("sqlite", { create: true });
+    for (const d of dbs) await writeFile(dir, encName(d.name), d.bytes);
+  }
+  await writeFile(root, "current", new TextEncoder().encode(String(next)));
+  generation = next;
+  lastDigest = digest;
+  // Old generations (and the legacy tree) only go after the flip.
+  for await (const [name] of root.entries()) {
+    if (name === `snap-${next}` || name === "current") continue;
+    if (name === "accounts" || /^snap-\d+$/.test(name)) {
+      try { await root.removeEntry(name, { recursive: true }); } catch {}
+    }
+  }
+}
+
+async function digestOf(files, dbs) {
+  const parts = [];
+  for (const f of files) parts.push(new TextEncoder().encode(f.path + "\0"), f.bytes);
+  for (const d of dbs) parts.push(new TextEncoder().encode("db:" + d.name + "\0"), d.bytes);
+  const buf = await new Blob(parts).arrayBuffer();
+  const h = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(h)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 self.onmessage = async (e) => {
@@ -140,7 +211,14 @@ self.onmessage = async (e) => {
     );
   } else if (d.type === "read-file") {
     try {
-      const bytes = glue.vfs_read(d.path);
+      let bytes;
+      try {
+        bytes = glue.vfs_read(d.path);
+      } catch (err) {
+        // dc.db is in the SQLite VFS, not the memfs (#124's fallback read).
+        if (typeof glue.sqlite_export !== "function") throw err;
+        bytes = glue.sqlite_export(d.path);
+      }
       self.postMessage({ type: "file", id: d.id, bytes });
     } catch (err) {
       self.postMessage({ type: "file-error", id: d.id, error: String(err?.message ?? err) });

@@ -1170,6 +1170,7 @@ dependencies = [
  "futures-core",
  "js-sys",
  "serde_json",
+ "sqlite-wasm-rs",
  "velta-tokio-wasm",
  "wasm-bindgen",
  "wasm-bindgen-futures",

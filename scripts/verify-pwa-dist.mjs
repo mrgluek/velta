@@ -96,7 +96,12 @@ check(await page.locator('#splash').isVisible().catch(() => false), 'unconfigure
 await page.waitForTimeout(10_000)
 const opfsFirst = await page.evaluate(async () => {
   try {
-    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('accounts')
+    const root = await navigator.storage.getDirectory()
+    // Generational layout (#123): current → snap-<n>/{accounts,sqlite}.
+    const cur = await (await (await root.getFileHandle('current')).getFile()).text()
+    const snap = await root.getDirectoryHandle(`snap-${cur.trim()}`)
+    await snap.getDirectoryHandle('sqlite') // the databases must be saved too
+    const dir = await snap.getDirectoryHandle('accounts')
     const names = []
     for await (const [name] of dir.entries()) names.push(name)
     return { entries: names.length }
@@ -111,7 +116,12 @@ await page.waitForTimeout(2_000) // give the core a moment to finish init
 
 const opfs = await page.evaluate(async () => {
   try {
-    const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('accounts')
+    const root = await navigator.storage.getDirectory()
+    // Generational layout (#123): current → snap-<n>/{accounts,sqlite}.
+    const cur = await (await (await root.getFileHandle('current')).getFile()).text()
+    const snap = await root.getDirectoryHandle(`snap-${cur.trim()}`)
+    await snap.getDirectoryHandle('sqlite') // the databases must be saved too
+    const dir = await snap.getDirectoryHandle('accounts')
     const names = []
     for await (const [name] of dir.entries()) names.push(name)
     return { entries: names.length, persisted: await navigator.storage.persisted?.() ?? null }

@@ -4,7 +4,7 @@ import "./components.js";
 import { escapeHtml, escapeAttr } from "./components.js";
 import { chatCategoryOf, swipeCategoryStep, batteryReactionPlan } from "./rpc-core.js";
 import { fileUrl, setWasmBlobReader, redactMediaUrl } from "./media.js";
-import { buildAvatarSvg, setFingerprintSource, fingerprintFor, fingerprintGroups } from "./avatar.js";
+import { buildAvatarSvg, setFingerprintSource, fingerprintFor, fingerprintGroups, cachedFingerprintIsDerived } from "./avatar.js";
 import { ChatView, setAvatarProfileOpener } from "./chat-view.js";
 import { initCalls } from "./calls.js";
 import { initWebxdc } from "./webxdc-manager.js";
@@ -3528,6 +3528,12 @@ if (navigator.serviceWorker) {
   });
   navigator.serviceWorker.controller?.postMessage({ type: "velta-pending-notification" });
 }
+// PWA dist: pwa-config.js fires this when a new service worker took over an
+// already-open page. This page still runs the old files until a reload.
+addEventListener("velta-sw-updated", () => {
+  diagnostics.append("info", "A new Velta version was installed; reload to use it");
+  toast("Velta was updated — reload the page to use the new version", 8000);
+});
 
 // Doze and OEM battery managers freeze the in-process core while the
 // activity is stopped, so mail waits until the next open. Asked again each
@@ -4193,6 +4199,10 @@ async function runIdentityRestore(file, pass, onPhase) {
     await core.transport.writeCoreFile(`${dir}/${name}`, base64ToBytes(b64));
   }
   await core.importSelfKeys(id, dir, pass);
+  // #126: the reload must not outrun the save, or the restored profile
+  // (login + keys) is not on disk yet and the next load starts empty.
+  onPhase("Saving profile…");
+  await core.transport.checkpoint?.();
   onPhase("Done — reloading…");
   setTimeout(() => location.reload(), 800);
 }
