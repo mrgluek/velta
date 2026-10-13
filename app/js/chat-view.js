@@ -170,6 +170,7 @@ const FWD_ARTICLE = (viewtype) => (/^[aeiou]/.test(FWD_NOUN(viewtype)) ? "an " :
 const ICO = {
   reply: `<svg viewBox="0 0 24 24"><path d="M9 14L4 9l5-5M4 9h9a7 7 0 017 7v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   copy: `<svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V5a2 2 0 012-2h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
+  selectText: `<svg viewBox="0 0 24 24"><path d="M4 8.5h5.5M4 12h3.5M4 15.5h5.5M18 4.5v15M16 4.5h4M16 19.5h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
   forward: `<svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5M20 9h-9a7 7 0 00-7 7v2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
   star: `<svg viewBox="0 0 24 24"><path d="M12 3l2.7 5.8 6.3.7-4.7 4.3 1.3 6.2-5.6-3.2-5.6 3.2 1.3-6.2L3 9.5l6.3-.7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>`,
   select: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M8.5 12.5l2.5 2.5 5-5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
@@ -2378,7 +2379,7 @@ export class ChatView {
     // text stays whole-message and plain-text only. Touch only — desktop
     // uses the mouse and the floating Reply chip.
     if (m.viewtype === "text" && m.text) items.push({ label: "Copy text", short: "Copy", pair: "text", icon: ICO.copy, onClick: () => { navigator.clipboard?.writeText(m.text); toast("Copied"); } });
-    if (m.text && touch) items.push({ label: "Select text", pair: "text", icon: ICO.copy, onClick: () => this._selectMessageText(m.id) });
+    if (m.text && touch) items.push({ label: "Select text", pair: "text", icon: ICO.selectText, onClick: () => this._selectMessageText(m.id) });
     if (!p2pg) items.push(
       { label: "Forward", pair: "send", icon: ICO.forward, onClick: () => this._forward([m.id]) },
     );

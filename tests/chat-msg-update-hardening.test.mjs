@@ -549,6 +549,8 @@ test("Select text opens an in-bubble bar and blocks the message menu", async t =
   const menu = node("popups").querySelector(".ctx-menu");
   const select = [...menu.querySelectorAll("button")].find(b => b.innerHTML.includes(">Select text<"));
   assert.ok(select, "the message menu offers Select text");
+  assert.ok(select.innerHTML.includes("M18 4.5v15"), "Select text uses the cursor icon");
+  assert.equal(select.innerHTML.includes("M5 15V5"), false);
   await select.fire("click");
 
   assert.ok(text.className.split(/\s+/).includes("text-selecting"));
