@@ -3,6 +3,9 @@
 Turns the fork branch into a working relay-native setup for the Velta PWA,
 then runs the wasm e2e against it (landing checklist §5, C3 box).
 
+Install, configure, and uninstall of this proxy on a relay that is already
+up, and of the invite-only module, is [`../relay-modules.md`](../relay-modules.md).
+
 Branch: `pbuzdin/relay` `websockify-c3` (upstream websockify PR #1030 +
 Velta hardening — see `cmdeploy/src/cmdeploy/websockify/README.md` on the
 branch and spike log Days 22–23).
@@ -44,10 +47,11 @@ DNS bridge 8153) and the patched `newemail.py` CGI.
 ## 2. Verify by hand (no browser needed)
 
 ```sh
-# DNS bridge answers a JSON IP array and closes. nginx ignores the address
-# in /tcp/<ip>/<port> and dials local IMAP/submission, so the answer is
-# loopback for the mail domain (anything else is []).
+# DNS bridge answers a JSON IP array and closes. This relay's own name is
+# loopback. Any other name is its public addresses. /tcp/<ip>/{443,465,993}
+# dials that address (private addresses refused, except 127.0.0.1).
 websocat -1 wss://<relay-domain>/dns/<relay-domain>          # → ["127.0.0.1"]
+websocat -1 wss://<relay-domain>/dns/example.com             # → public IPs, not []
 # Origin gate: browser-like handshake from a disallowed origin is refused:
 websocat -H 'Origin: https://evil.example' wss://<relay-domain>/tcp/<relay-domain>/993  # → 403
 # Mail tunnels carry TLS (client-side): an openssl handshake through the tunnel:

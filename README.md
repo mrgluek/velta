@@ -15,7 +15,7 @@ Velta shares one web frontend (`app/`) between:
 - **Windows desktop** — a Tauri 2 app that bundles `deltachat-rpc-server.exe` as a sidecar.
 - **macOS desktop** (test build) — the same Tauri 2 app with `deltachat-rpc-server` bundled as an `externalBin` sidecar; universal (Apple Silicon + Intel), ad-hoc signed, not notarized yet — see [Install on macOS](#install).
 - **Android mobile** — the same Tauri 2 app, but the Delta Chat core runs in-process inside the APK. A foreground service keeps sync (and notifications) running after the app is backgrounded.
-- **Browser/PWA** (work in progress) — the same frontend can be served statically and connects to a local `velta-core-service` over loopback WebSocket/HTTP, or falls back to a mock core for demo purposes. The PWA's target deployment is a **remote core service over WSS/TLS** — the loopback bridge remains the local/dev path. If the loopback connection drops mid-session (service restart), the app reconnects automatically — backoff up to 15 s — and refreshes the chat list; no reload needed.
+- **Browser/PWA** (work in progress) — the same frontend can be served statically and connects to a local `velta-core-service` over loopback WebSocket/HTTP, or falls back to a mock core for demo purposes. The PWA's target deployment is a **remote core service over WSS/TLS** — the loopback bridge remains the local/dev path. If the loopback connection drops mid-session (service restart), the app reconnects automatically — backoff up to 15 s — and refreshes the chat list; no reload needed. A refresh of the wasm PWA keeps the signed-in account: the browser copy is written at login and again when the page hides. A crash can drop the last few seconds until the next sync.
 
 The UI is plain HTML/CSS/ES modules (no bundler). The backend is the upstream [Delta Chat core](https://github.com/chatmail/core) at version `2.63.0`.
 
@@ -94,6 +94,8 @@ UI: `app/js/p2p.js`. A headless terminal hub for debugging lives in
 Local chat is **disabled by default**. Switch it on/off in the drawer
 ("Local chat: on/off"): when off, the engine never starts (no endpoint
 socket, no LAN beacons) and the card and drawer rows disappear. The
+browser shows that switch after **Enter local chat…**, so the preview
+can be turned off. The
 preference persists across restarts. On first run the welcome screen offers
 "Enter local chat…" — it enables local chat and skips relay setup; enabling
 local chat again later brings the setup screen back.
@@ -364,6 +366,9 @@ profiles around).
   picker — the backup downloads straight from the page as
   `velta-backup-<addr>-<date>.tar`. On Android a system save dialog asks
   where to put the `.tar`, so a file manager can reach it.
+- **Identity backup** (browser PWA) — drawer **Identity backup…** saves the
+  mail login and keys in a passphrase file (at least 8 characters). It is
+  not the full message archive. The profile must already be signed in.
 - **Delete profile** — permanently removes the profile you are in: the
   account, its keys, the message database and all blobs on this device.
   Velta asks you to type the profile's address to confirm, suggests writing
@@ -564,8 +569,8 @@ Both paths run through the same send-image flow: a preview with an optional
 **caption** and a free-form **Crop** step (drag to move the selection, corner
 handle to resize) before sending. Picking two or more photos in the gallery
 sends each one immediately as its own message, with no caption strip. One
-photo still stops in the strip. In the browser, several photos at once need
-the Velta app. The drawer's **Image quality** setting controls what happens to the images
+photo still stops in the strip. In the browser those photos are written
+into the local core and sent the same way. The drawer's **Image quality** setting controls what happens to the images
 you send: **Standard** compresses large photos down to 940 KB, **Compact**
 down to 130 KB (smaller photos are sent unchanged either way). Compact keeps
 uploads small and relay storage lasting longer. With **Compress photos to save relay
@@ -681,7 +686,7 @@ Hovering a message on desktop shows a small **Reply** pill along the bubble's ri
 
 On a phone, swipe a bubble to the right to reply. The bubble slides a short way with your finger, and letting go far enough sets the reply and focuses the composer, the same as Reply in the menu. A short swipe snaps the bubble back. Swipe left on the message history to go back to the chat list: the chat screen follows your finger, the list shows underneath, and letting go far enough leaves the chat, the same as the back button. A short swipe snaps back. Scrolling up and down stays a scroll. A read-only chat can swipe back, and it does not swipe to reply. Neither swipe runs on desktop.
 
-On a phone, long-press a bubble to open the message menu. That hold does not start the system's text selection. Choose **Select text** when you want the handles. The whole message starts selected, and the native handles shrink that span. **Reply**, **Copy**, and **Close** sit inside the bubble: Reply quotes just the selected text, Copy copies that span, and Close leaves the mode and dismisses the handles. While that bar is open, a long-press does not open the message menu. The desktop message menu has no Select text. Select with the mouse as usual; on desktop a small Reply chip quotes the selection (the floating chip is desktop-only — touch quotes through this Select-text flow).
+On a phone, long-press a bubble to open the message menu. That hold does not start the system's text selection. Choose **Select text** when you want the handles. The whole message starts selected, and the native handles shrink that span. **Reply**, **Copy**, and **Close** sit inside the bubble: Reply quotes just the selected text, Copy copies that span, and Close leaves the mode and dismisses the handles. While that bar is open, a long-press does not open the message menu. The desktop message menu has no Select text. Select with the mouse as usual; on desktop a small Reply chip quotes the selection (the floating chip is desktop-only — touch quotes through this Select-text flow). **Download** on an image, video, or file saves it. Android asks where to put the file. Desktop and the browser save it from the page.
 
 Note: other Delta Chat clients render only the core's markdown subset (bold, italic, strikethrough, code). Underline and lists are Velta-side rendering niceties — other clients show those markers literally.
 
@@ -986,6 +991,9 @@ contact's OpenPGP fingerprint: an equal-height 4-row grid (3 squares, 2 rects,
 2 rects, 3 squares — one cell per fingerprint group), with a fingerprint glyph
 centered on a soft-black badge for photo-less contacts, and the contact's photo
 as a padded rounded square (with a thin dark ring) for contacts that set one.
+The grid follows the key's fingerprint lines, so the same person looks the
+same on desktop and in the browser. Hex in a display name does not change
+the tile. A contact with no key is colored from their email address.
 Neighboring cells never share similar hues, all colors are soft (no pure
 black/white), and everything is drawn as pure SVG in `app/js/avatar.js` —
 painted as a CSS background image per tile (one cached image per fingerprint,

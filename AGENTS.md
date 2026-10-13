@@ -67,7 +67,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   │   ├── rpc-core.js       # JsonRpcCore wrapper over transports + event mapping
 │   │   ├── transport.js      # backend auto-detection (Tauri, WebSocket, HTTP, mock)
 │   │   ├── transport-worker-wasm.js # wasm transport: hosts the core in a module worker; memfs file passthrough (readCoreFile/readCoreFileList/writeCoreFile), single-tab Web Locks gate
-│   │   ├── worker-wasm.js    # wasm worker: OPFS snapshot → memfs before core init (persist boot FAILS LOUDLY without OPFS — #106), checkpoint stages in memory before the destructive rewrite, memfs file ops
+│   │   ├── worker-wasm.js    # wasm worker: OPFS snapshot → memfs before core init (persist boot FAILS LOUDLY without OPFS — #106), checkpoint stages in memory before the destructive rewrite, serialized, also on page hide and after login; memfs file ops
 │   │   ├── identity-backup.js # V2.5 identity backup: bundle build/wrap/unwrap (WebCrypto), base64 helpers, backup download name (#104), gzipBytes/gunzipBytes (CompressionStream — returns input unchanged when unsupported; callers detect by identity to decide the .gz suffix)
 │   │   ├── ws-relays.js      # PWA websocket relay list; baked VELTA_PWA.wsProxyUrl until a domain is chosen; probeC3Relay (C3 capability probe)
 │   │   ├── webxdc-manager.js # webxdc host: opaque-origin sandboxed app overlay, shim postMessage relay, per-instance serials
@@ -144,6 +144,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 ├── docs/research/wasm-core-mail-proxy-spike.md    # wasm spike log, day-by-day — status header = current state
 ├── docs/research/wasm-core-landing-checklist.md   # landing gate: every ⬜→✅ box; master core/ stays stock until green
 ├── docs/research/wasm-core-lock-landing-plan.md   # ordered review/merge steps for the core/Cargo.lock diff at landing
+├── docs/relay-modules.md          # install / configure / uninstall: invite-only signup and the WebSocket proxy
 ├── docs/research/websockify-c3-deploy.md          # C3 runbook: deploy the websockify-c3 relay, verify, RELAY_WS_URL e2e
 ├── docs/research/ws-relay-endpoints-probe.md      # external WS endpoints vs the C3 contract — chatmail.uk /ygg-ws = Yggdrasil peering, not a mail tunnel (10-09)
 ├── docs/research/wasm-patches/   # 10-patch wasm series (series.txt, VENDORED.md, pinned locks + PROVENANCE)
@@ -372,6 +373,14 @@ Tauri still can't take over the transport. Gotchas (spike Day 19):
   OPFS is unavailable (boot-error, no silent empty boot → no stray account),
   and `checkpoint()` stages the snapshot in memory before the destructive
   `removeEntry` so a mid-walk throw can't wipe the stored snapshot.
+  One snapshot at a time (`checkpointChain`). The 8s interval is not enough
+  for a refresh: the transport also checkpoints after `init()` and after
+  `configureWithCredentials` / `configureWithQr`, and flushes on
+  `visibilitychange` hidden and `pagehide`. `acquireWasmLock` retries
+  `velta-wasm-core` for 1.5s so the dying page is not treated as a second
+  tab. A tab that still holds the lock after that fails, and createCore can
+  still land in the demo. A crash can drop the tail since the last snapshot.
+  Pinned by `tests/wasm-boot-order.test.mjs` and `tests/wasm-session.test.mjs`.
 - The verify rig's static server serves the dist from memory on purpose:
   per-request reads of the 28 MB wasm flaked connections under the SW-install
   burst (install fails → registration goes redundant).
@@ -385,8 +394,10 @@ Wasm mail in that dist (`tests/ws-relays.test.mjs`, `tests/wasm-blob-url.test.mj
   passed to the worker-wasm core. An untouched install returns the baked
   `window.VELTA_PWA.wsProxyUrl` and writes nothing. After a change the URL
   is `wss://<host>` (`localStorage` `velta-ws-relays` / `velta-ws-relay`).
-  The last domain cannot be removed. Use, editing the in-use host, or
-  removing it reloads after 400 ms — the core reads the proxy once.
+  The last domain cannot be removed. With nothing stored and an empty
+  baked URL, the page hostname is the tunnel (a dev `localhost` stays
+  proxy-less). Use, editing the in-use host, or removing it reloads
+  after 400 ms — the core reads the proxy once.
   Splash "WebSocket relays" and the drawer item exist only outside Tauri
   and VeltaBridge, and only when `VELTA_PWA.wasmCore` or
   `localStorage velta-wasm===1`. Create-account prefills `activeWsRelay()`.
@@ -398,9 +409,13 @@ Wasm mail in that dist (`tests/ws-relays.test.mjs`, `tests/wasm-blob-url.test.mj
   `ensureMailTunnelForLink(link)` first — PWA only (`VELTA_PWA.wasmCore`),
   never the shells/mock. It probes `wss://<host>/dns/<host>`
   (`probeC3Relay`, ws-relays.js): a capable relay answers its own name with
-  a NON-EMPTY JSON IP array; 404 (stock chatmail, e.g. nine.testrun.org),
-  origin-gate 403, HTML, or silence → clear error instead of the core's
-  misleading "Could not find DNS resolutions". Capable-but-not-active →
+  a NON-EMPTY JSON IP array; 404 (stock chatmail), origin-gate 403, HTML,
+  or silence means that host has no tunnel. If the active tunnel resolves
+  the host (`probeDnsVia`), create-account stays on it and does not
+  reload. The wasm worker rewrites `POST https://<host>/new` to same-origin
+  `/cm-new/<host>` because stock chatmail sends no CORS header. Autopick
+  first resolves `example.com` through the active tunnel and refuses a
+  tunnel that only answers its own name. Capable-but-not-active →
   `addWsRelay`+`useWsRelay`+stash the link in `sessionStorage
   velta-pending-add`+reload; boot resumes the create after the
   notifications block (stash removed before use — no reload loops). Note:
@@ -450,14 +465,14 @@ Wasm mail in that dist (`tests/ws-relays.test.mjs`, `tests/wasm-blob-url.test.mj
   default-pool name → tarpitted by strict receivers, queue waiting on the
   rDNS fix.
 - **The logged IP is the DNS answer, printed before connect.** On wasm the
-  dial is `wss://<proxy>/tcp/<ip>/993` (465 for submission). nginx ignores
-  `<ip>` and connects to this relay's Dovecot or Postfix; TLS checks the
-  hostname. `/dns/<host>` answers `["127.0.0.1"]` for the configured mail
-  domain and `[]` otherwise, so a proxied name does not come back as public
-  anycast. After a reload the first attempt is that loopback address.
-  Older addresses can still show up later from the account `dns_cache`
-  (fresh results first, then the cache). Those tunnels land on local mail
-  too. Runbook: `docs/research/websockify-c3-deploy.md`.
+  dial is `wss://<proxy>/tcp/<ip>/993` (465 for submission, 443 for the
+  autopick probe). The bridge dials that address. `/dns/<mail-domain>`
+  stays `["127.0.0.1"]` so this relay's own mail does not hairpin through
+  a public address; any other name is its public addresses. Private
+  addresses are refused, except `127.0.0.1` on 443, 465, and 993.
+  `/imap` and `/smtp` stay pinned to local mail. An old `dns_cache` entry
+  can still name a previous address; fresh results come first.
+  Runbook: `docs/research/websockify-c3-deploy.md`.
 - **Close code 1005 is the socket shutting down.** `ws_stream_wasm` calls
   `WebSocket.close()` with no code. websockify answers that empty close
   with status 1005, which is reserved. Chrome logs "Received a broken close
@@ -479,6 +494,13 @@ Wasm mail in that dist (`tests/ws-relays.test.mjs`, `tests/wasm-blob-url.test.mj
   `[data-v="sw"]` matches `velta-vNN` and `velta-pwa-<12 hex>` and paints
   again on `navigator.serviceWorker.ready` (the drawer is built before the
   cache exists). `app/diag.html` still parses only `velta-v\d+`.
+- **Identity backup password.** `mailLoginForBackup` prefers
+  `listTransports()` (`password`, else `imap.password`, else `imap_password`)
+  for the sending address when that row has a password, else the first row
+  that has both. If the RPC list has none, it reads the selected account dir
+  from `/accounts/accounts.toml` and that account's `dc.db` text only.
+  No password still throws "not configured yet". Core 2.63 does not write
+  `mail_pw`. Pinned by `tests/identity-backup.test.mjs`.
 
 ### 4.3 Tauri desktop/Android app (`velta-app/`)
 
@@ -1008,10 +1030,20 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   a distinct filename (`<ms>-<i>`) so two picks do not share one file.
   The pending reply rides the first image only. One image — a string, or
   the one-element array the dialog returns for a single pick — still
-  stages for a caption. The browser file input can select several images
-  but cannot write them into core storage, so more than one toasts that
-  sending needs the Velta app. Pinned by
+  stages for a caption. The browser file input has no Tauri path.
+  `_writeBlobForSend` writes the bytes with `transport.writeCoreFile` at
+  `/uploads/<name>` (slashes stripped) and the core copies that into the
+  blobdir. Several images each send (`_sendLocalImages`). One image still
+  stages. Voice, paste, and crop use the same write. Desktop and Android
+  keep `resolve_upload_path` plus `plugin:fs|write_file`. Pinned by
   `tests/chat-account-isolation.test.mjs`.
+- **Save attachment.** Message menu **Download** (image, video, or file;
+  stickers stay **Save sticker**) calls `_saveAttachment`. A file still
+  on the server is fetched first. Android opens the system save dialog
+  and `save_attachment` copies the account-scoped path to that content
+  URI. Desktop and the PWA save the bytes from the page (the desktop
+  command only returns an error). Pinned by
+  `tests/chat-msg-update-hardening.test.mjs`.
 - **Voice messages** record in the composer (attach menu → Voice message;
   hidden in local chats — that core rejects `viewtype: voice`).
   `MediaRecorder` + `getUserMedia({audio:true})`; `#voice-rec` shows the
@@ -1221,8 +1253,14 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   Elena does not reliably call `updated()` on first render, so bind from
   `updated()` AND once via rAF from `connectedCallback`). The fingerprint
   itself is fetched once per `(accountId, contactId)` via `setFingerprintSource`
-  (wired by app.js with `core.accountId`) and kept across account switches —
-  contact ids are per-account, hence the composite key; entries never expire.
+  (wired by app.js with `core.accountId` and `addrOf`) and kept across account
+  switches — contact ids are per-account, hence the composite key; entries
+  never expire. `parseFingerprint` reads only the grouped fingerprint lines,
+  so hex in a display name or address is not part of the key. The block is
+  the one whose address matches. No parsed key hashes the address (the
+  element `addr`, or `addrOf`). Self has no core fingerprint (contact 1
+  errors), so that tile follows the address too. Chat list and chat head
+  pass `addr` when the contact has one. Same key, same tile on every shell.
 - **Profile sheet (`showChatInfo`) hydration contract**: the full contact
   (real avatar, bot flag, presence) is fetched whenever `chat.contact` is
   absent — group-opened profiles (`openContactProfile`) therefore pass NO
@@ -1518,8 +1556,9 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   box stays a textarea and ignores Enter during IME composition;
   `field-sizing` on the composer is behind `@supports`, with `sizeComposer`
   kept for Android 7 and Safari; day-chip `<time>` uses a local
-  `YYYY-MM-DD`, not a UTC slice; a file chosen in the browser still cannot
-  be sent without the Velta app (the core wants a real path); toast close
+  `YYYY-MM-DD`, not a UTC slice; a file chosen in the browser is written
+  into the wasm core with `writeCoreFile` (shells still use
+  `resolve_upload_path`); toast close
   is `CLOSE_SVG` at `--ico-2`. Tests: `tests/native-elements.test.mjs`.
 - `app/js/mock-core.js` — self-contained demo backend when no real core is
   reachable (`localStorage["velta-mock"] = "1"` forces it). Implements the
@@ -1679,6 +1718,9 @@ discovery). Pairing tickets, offline queues, media chunking, the
 `local-chat.js` Proxy adapter and its test pins are documented in
 docs/agents/p2p.md. KEEP: local chat is disabled by default — a fresh
 install must not open QUIC sockets or broadcast LAN beacons unasked.
+The drawer switch is also shown in the browser while the preference is
+on, so "Enter local chat…" can be turned off. The typing row stays
+engine-only.
 Local groups (≤ 5 members, creator-signed roster, per-sender seq replay),
 the typing indicator and group media (32 MiB, streamed per online member)
 are protocol-2 features, documented in docs/agents/p2p.md. KEEP: every new
@@ -1877,7 +1919,7 @@ next push or the tainted commits come back.
 ### 7.2 Frontend
 
 Regression suites (Node's built-in test runner, no dependencies). Run the
-whole set — 65 files, 502 tests as of 2026-10-13:
+whole set — 66 files, 516 tests as of 2026-10-13:
 
 ```bash
 node --test tests/
@@ -1893,6 +1935,7 @@ wrapper boundaries (`delete-account.test.mjs`), the sync-only-active IO
 funnel (`sync-only-active.test.mjs`), wasm worker boot/checkpoint ordering
 driven through the real worker script (`wasm-boot-order.test.mjs`), the
 identity-backup crypto + restore-ordering pins (`identity-backup.test.mjs`),
+the refresh lock wait (`wasm-session.test.mjs`),
 backup export naming/gating + gzip round-trip (`backup-export.test.mjs`),
 PWA notifications + wake-lock wiring (`pwa-notify-wakelock.test.mjs`), and
 the modal-history

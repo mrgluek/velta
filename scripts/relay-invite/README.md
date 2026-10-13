@@ -35,40 +35,7 @@ Two files, deployed to the relay box:
 
 ## Deploy
 
-1. Copy the files to the paths above (target user `root`; the CGI must be
-   readable+executable by the fcgiwrap user, typically `www-data`).
-2. Store directory (the CGI needs group **write**):
-
-   ```bash
-   mkdir -p /var/lib/velta-invites
-   chown root:www-data /var/lib/velta-invites
-   chmod 750 /var/lib/velta-invites
-   touch /var/lib/velta-invites/invites.json
-   chown root:www-data /var/lib/velta-invites/invites.json
-   chmod 660 /var/lib/velta-invites/invites.json
-   ```
-
-3. nginx, inside the HTTPS server block (fcgiwrap assumed at
-   `/run/fcgiwrap.socket`):
-
-   ```nginx
-   location /i/ {
-       add_header Access-Control-Allow-Origin $newmail_acao always;  # optional
-       fastcgi_pass unix:/run/fcgiwrap.socket;
-       include /etc/nginx/fastcgi_params;
-       fastcgi_param SCRIPT_FILENAME /usr/lib/cgi-bin/invite.py;
-       fastcgi_param PATH_INFO $uri;
-   }
-   ```
-
-4. Close open signup so the invite is the only path:
-
-   ```nginx
-   location /new { default_type text/plain; return 403 "invite-only relay\n"; }
-   location /cgi-bin/newemail.py { default_type text/plain; return 403 "invite-only relay\n"; }
-   ```
-
-   (`nginx -t && systemctl reload nginx`.)
+Install, configure, and uninstall: [`docs/relay-modules.md`](../../docs/relay-modules.md).
 
 ## Usage
 

@@ -76,6 +76,20 @@ fall through to the original bytes, so the UI can never regress on a
 failed thumbnail. Bubble images pass `thumb:true`; the lightbox never
 does.
 
+## PWA send and save
+
+With no Tauri `invoke`, `ChatView._writeBlobForSend` writes the blob
+through `transport.writeCoreFile` at `/uploads/<name>` (slashes stripped).
+The core copies that path into the blobdir. Desktop and Android keep
+`resolve_upload_path` plus `plugin:fs|write_file`. Several gallery images
+each send as their own message. One image still stages. Voice, paste, and
+crop use the same write.
+
+Message menu **Download** (image, video, file) calls `_saveAttachment`.
+A file still on the server is fetched first. Android opens the system
+save dialog and `save_attachment` copies the account-scoped file to that
+content URI. Desktop and the PWA save the bytes from the page.
+
 ## Outgoing photo compression (#81)
 
 `app/js/image-compress.js` re-encodes big outgoing photos to lossy WebP in the

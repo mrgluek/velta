@@ -36,8 +36,9 @@ iroh (QUIC, `RelayMode::Disabled`, optional mDNS re-discovery via the
   `app/js/p2p.js`, which calls `p2p_set_enabled(true)` only when opted
   in). KEEP: a fresh install must not open QUIC sockets or broadcast LAN
   beacons without the user asking for it.
-- UI (`app/js/p2p.js`): drawer entry (Tauri-only, hidden in browser/PWA
-  mode), hub with online dots, "Nearby devices" (UDP beacon on port 53717),
+- UI (`app/js/p2p.js`): drawer entry is shown when the engine exists, and
+  also while the preference is on, so a browser that used "Enter local chat…"
+  can turn the preview off. The typing row stays engine-only. Hub with online dots, "Nearby devices" (UDP beacon on port 53717),
   invite QR display, pairing via beacon tap (requires approval on the other
   device) or pasted/scanned code (`acquireCode` offers camera scanning —
   native `BarcodeDetector` where the WebView supports it, vendored jsQR (minified, ~131 KB,
