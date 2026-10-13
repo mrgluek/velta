@@ -713,11 +713,17 @@ test("Select text is hidden on a fine pointer and shown on a coarse one", async 
   assert.ok(more, "the last reaction cell opens the emoji tray");
   await more.fire("click");
   const tray = menu.querySelector(".msg-emoji-tray");
+  const reacts = menu.querySelector(".msg-reacts");
   assert.equal(tray.hidden, false);
+  assert.equal(reacts.hidden, true);
   const search = menu.querySelector("input");
   search.value = "heart";
   await search.fire("input");
   assert.ok([...menu.querySelectorAll(".msg-emoji")].some(b => b.textContent === "❤️"));
+  await menu.querySelector(".msg-emoji-back").fire("click");
+  assert.equal(tray.hidden, true);
+  assert.equal(reacts.hidden, false);
+  assert.equal(search.value, "");
 });
 
 test("the message menu has no Read up to here item", async t => {

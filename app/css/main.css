@@ -1423,6 +1423,10 @@ velta-chat-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
   background: var(--bg); border-radius: 12px; min-height: 48px;
 }
 .msg-emoji-tray { margin-bottom: 12px; }
+.msg-emoji-back {
+  margin: 0 0 8px; padding: 4px 12px; border-radius: 999px;
+  background: var(--bg-hover); color: var(--text); font: inherit; font-size: 14px;
+}
 .msg-emoji-tray .text-field { width: 100%; margin: 0 0 8px; }
 .msg-emoji-grid {
   display: grid; grid-template-columns: repeat(8, 1fr);

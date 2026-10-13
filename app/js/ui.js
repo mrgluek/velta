@@ -149,6 +149,10 @@ export function showMessageSheet({ reactions = [], onReact, items }) {
     const tray = document.createElement("div");
     tray.className = "msg-emoji-tray";
     tray.hidden = true;
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "msg-emoji-back";
+    back.textContent = "Back";
     const search = document.createElement("input");
     search.type = "search";
     search.className = "text-field";
@@ -184,7 +188,12 @@ export function showMessageSheet({ reactions = [], onReact, items }) {
       paint();
       search.focus();
     });
-    tray.append(search, grid);
+    back.addEventListener("click", () => {
+      search.value = "";
+      tray.hidden = true;
+      reacts.hidden = false;
+    });
+    tray.append(back, search, grid);
     reacts.append(more);
     menu.append(reacts, tray);
   }
