@@ -64,7 +64,12 @@ the router decides per connection:
 used when it starts with TLS (993, 465, 443) and on 443 for STARTTLS ports. All relays failing
   while any canary answers twice in a row = blocked → TUNNEL; a relay
   answering directly three times = back to DIRECT; nothing answering =
-  offline, no change. A route switch closes the old route's connections so
+  offline, no change. Before that switch the same relays are TLS-probed
+  through the tunnel: if a live soar session can't reach any of them
+  either, they are down, not blocked (one profile with one dead relay
+  looks exactly like an allowlist), so the route stays DIRECT with state
+  `relays-down`, rechecked every minute. Without a live session the
+  check proves nothing and the switch goes ahead. A route switch closes the old route's connections so
   the core reconnects at once.
 - **always** / **off**: fixed route.
 
@@ -136,21 +141,21 @@ localStorage (no repeats after a UI reload).
 
 ## soar dependency (path stats)
 
-`go.mod` replaces `github.com/getlantern/soar` with `github.com/mrgluek/soar`
-(branch `path-stats`, proposed upstream): the pinned upstream commit plus
-`Client.PathStats()`,
-`Client.Established()` and `Config.StreamOnly` (port-853 resolvers get their
-DoT path at once instead of a UDP path that can only time out), because path state is otherwise internal and the
-`SOAR_DEBUG` dump goes to stderr, which Android loses. The status JSON
-carries `paths` (per resolver: transport udp/tcp/dot, verified, suspended,
-RTT in ns, loss, window, name length, answer size, successes) and the
-report prints them working-first; `soar-socks -paths` prints the same table.
-Drop the replace once upstream has an equivalent API.
+`go.mod` requires `github.com/getlantern/soar` v0.2.0, the first release with
+`Client.PathStats()`, `Client.Established()` and `Config.StreamOnly`
+(port-853 resolvers get their DoT path at once instead of a UDP path that can
+only time out). Path state is otherwise internal, and the `SOAR_DEBUG` dump
+goes to stderr, which Android loses. The status JSON carries `paths` (per
+resolver: transport udp/tcp/dot, verified, suspended, RTT in ns, loss,
+window, name length, `answer_limit` — the answer size soar's sizing has
+accepted, 0 until verified — successes) and the report prints them
+working-first; `soar-socks -paths` prints the same table. `StreamOnly` runs
+under the client's lock, so `isDoT` must stay a pure string check.
 
 ## soar tuning
 
 soar is pre-release (protocol may change; server and client must be
-upgraded together; `go.mod` pins a commit). Its 101-char starting name
+upgraded together; `go.mod` pins a release). Its 101-char starting name
 length never grew on Yandex paths and capped upload near 1.5 KB/s; the
 library sets `SafeQName 253`, `MaxPathWindow 64`. soar's own server refuses
 loopback/private destinations; restrict its egress to the relays with an

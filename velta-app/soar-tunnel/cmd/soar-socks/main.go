@@ -94,7 +94,7 @@ func main() {
 			if *paths {
 				for _, p := range s.Paths {
 					fmt.Fprintf(os.Stderr, "  %-28s %-4s verified=%-5v susp=%-5v rtt=%-6v loss=%.2f win=%.1f name=%d ans=%d ok=%d\n",
-						p.Resolver, p.Transport, p.Verified, p.Suspended, p.RTT.Round(time.Millisecond), p.Loss, p.Window, p.NameLen, p.AnswerBytes, p.Successes)
+						p.Resolver, p.Transport, p.Verified, p.Suspended, p.RTT.Round(time.Millisecond), p.Loss, p.Window, p.NameLen, p.AnswerLimit, p.Successes)
 				}
 			}
 		}
