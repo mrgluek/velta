@@ -1937,8 +1937,17 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
 li.active .step-ico { border: 2px solid var(--accent); border-top-color: transparent; animation: ob-spin .8s linear infinite; }
 li.done .step-ico { background: var(--accent); color: #f4f4f4; }
 li.done .step-ico::after { content: "✓"; }
-li.failed .step-ico { background: #e0685d; color: #f4f4f4; }
-li.failed .step-ico::after { content: "✕"; }
+/* Unicode ✕ is hairline-thin in the UI font, same as the close buttons. */
+li.failed .step-ico { background: #e0685d; position: relative; }
+li.failed .step-ico::before,
+li.failed .step-ico::after {
+  content: "";
+  position: absolute; left: 50%; top: 50%;
+  width: 8px; height: 2px; margin: -1px 0 0 -4px;
+  background: #f4f4f4; border-radius: 1px;
+}
+li.failed .step-ico::before { transform: rotate(45deg); }
+li.failed .step-ico::after { transform: rotate(-45deg); }
 @keyframes ob-spin { to { transform: rotate(360deg); } }
 .btn-text:disabled { opacity: .55; pointer-events: none; }
 .btn-loading::before { content: ""; display: inline-block; width: var(--ico-1); height: var(--ico-1); margin-right: 7px; vertical-align: -2px; border: 2px solid currentColor; border-top-color: transparent; border-radius: 50%; animation: ob-spin .8s linear infinite; }
