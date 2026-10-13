@@ -132,6 +132,15 @@ and do not swipe.
 Pinned by `tests/chat-msg-update-hardening.test.mjs`. The same contract is
 in AGENTS.md under "Mobile swipes (#35)".
 
+## Touch text selection (#121)
+
+Long-press on a bubble opens the message menu and does not start native
+text selection. Select text on that menu turns selection on for that
+bubble. The row's `selectstart` listener calls `preventDefault` until
+then, and `-webkit-touch-callout: none` is set on `.bubble` for a coarse
+pointer. A fine pointer still selects with the mouse. The link rule on
+`.msg-text a` stays drag-only: do not add `user-select` there.
+
 ## Text zoom
 
 `MainActivity` pins the WebView's `textZoom = 100` (bounded retry until the

@@ -132,12 +132,25 @@ a Voice message with no attachment. Local groups hide the menu item (their
 core rejects voice). `MessageData` has no duration; the `<audio>` element
 reads it from the file. Tests: `tests/chat-account-isolation.test.mjs`.
 
+## Several gallery images (#120)
+
+The image picker sets `multiple`. Two or more paths each go out as
+`viewtype: image` (`_sendSeparateImages` in chat-view.js). Content URIs
+are copied with a distinct filename (`<ms>-<index>`) so two picks do not
+overwrite one file. The pending reply is consumed once and attached to
+the first image. One path still uses the caption strip, including when
+the dialog returns a one-element array. The browser input can select
+several images; more than one toasts that sending needs the Velta app,
+because that path cannot write the files into core storage. Tests:
+`tests/chat-account-isolation.test.mjs`.
+
 ## Tracking params on links (#89)
 
 Not a media transform. `app/js/trackers.js` drops known tracker query
 params when a link is pasted or opened (drawer **Strip tracking from
 links**, default on). The baked preview and the voice file are separate.
-Tests: `tests/trackers.test.mjs`.
+Tests: `tests/trackers.test.mjs` (click ids, `hsa_` params, Spotify `si`,
+X `ref_src` / `ref_url`, Amazon `linkCode`, and a clean URL left as-is).
 
 ## Path scoping
 

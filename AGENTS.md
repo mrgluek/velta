@@ -131,6 +131,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 ├── docs/agents/              # per-subsystem agent notes (webxdc, relays,
 │                              p2p/local chat, android-shell, media,
 │                              onboarding, security-triage) — referenced from §5/§11
+├── docs/as-built-architecture.md # product snapshot at cd59531 (2026-10-13); no implementation plan
 ├── docs/web-components-audit.md  # UI semantics/a11y/progressive-rendering audit (2026-10-06)
 ├── docs/web-components-plan.md   # phased fix plan for that audit (quick wins → tests)
 ├── docs/modals-audit-and-plan.md # modal/overlay/popup inventory + native <dialog> plan
@@ -985,9 +986,10 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   single consumer of the pending reply (`replyTo`/`replyFragment`) — full
   replies ride the core's `quotedMessageId`, fragment replies become
   `"> "` quote lines prefixed to the text/caption — and `_send`,
-  `_sendPendingMedia`, `_sendVoiceFile` and `_sendAttachment`'s file/video
-  paths all use it. Adding a new send path MUST call `_takeQuote()` too,
-  or replies get silently dropped (the image path did, pre-1.4.26).
+  `_sendPendingMedia`, `_sendVoiceFile`, `_sendAttachment`'s file/video
+  paths, and `_sendSeparateImages` (the first image only) all use it.
+  Adding a new send path MUST call `_takeQuote()` too, or replies get
+  silently dropped (the image path did, pre-1.4.26).
 - **Pending attachment strip** (post-1.4.31, #5): no send-preview modal.
   Picked/pasted media shows in `#media-preview` (strip above the composer,
   official-client pattern); the caption IS the composer input, focused on
@@ -1000,6 +1002,16 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   shell media commands scope paths to AppLocalData, and out-of-tree
   picked files broke the poster/send reads. Media does NOT ride drafts —
   `close()` drops it (official client does the same).
+  Several gallery images (#120) skip the strip. The image picker opens
+  with `multiple`. Two or more paths each send immediately as their own
+  `viewtype: image` (`_sendSeparateImages`). Content URIs are copied with
+  a distinct filename (`<ms>-<i>`) so two picks do not share one file.
+  The pending reply rides the first image only. One image — a string, or
+  the one-element array the dialog returns for a single pick — still
+  stages for a caption. The browser file input can select several images
+  but cannot write them into core storage, so more than one toasts that
+  sending needs the Velta app. Pinned by
+  `tests/chat-account-isolation.test.mjs`.
 - **Voice messages** record in the composer (attach menu → Voice message;
   hidden in local chats — that core rejects `viewtype: voice`).
   `MediaRecorder` + `getUserMedia({audio:true})`; `#voice-rec` shows the
@@ -1050,9 +1062,15 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   the diagnostics chat. `open()`/`close()` clear the flag.
   Pinned by `tests/chat-msg-update-hardening.test.mjs`. Detail:
   docs/agents/android-shell.md.
-- **Select text (#36)** — bubble text stays unselectable on touch (long-press
-  belongs to the context menu; a native word selection used to steal half
-  the gesture). **Select text** is on the touch message menu only
+- **Select text (#36, #121)** — bubble text stays unselectable on touch
+  (long-press belongs to the context menu). `user-select: none` inside
+  `(hover: none) and (pointer: coarse)` is not enough: some WebViews
+  still start a native selection on long-press. The row's `selectstart`
+  listener calls `preventDefault` while `_offerSelectText()` is true and
+  this row is not already in Select text. `-webkit-touch-callout: none`
+  is on `.bubble` in that same query, and `default` on `.text-selecting`.
+  Do not put `user-select` on `.msg-text a` (that rule is drag-only).
+  **Select text** is on the touch message menu only
   (`_offerSelectText` hides it when `(hover: hover) and (pointer: fine)`
   matches). It calls
   `_enterBubbleTextSelection`: `.text-selecting` on that bubble's `.msg-text`,
@@ -1097,6 +1115,14 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   outgoing, and not-unread for incoming), Database ID (`#id`), the RFC 724
   Message-ID, and each server URL as `addr UID=n` (folder kept when it is
   not INBOX). Message-ID and server URLs come from `get_message_info_object`.
+  Reactions (#122) sit under State: one open `<details>` per emoji
+  (`messageInfoReactions` in format.js). The summary chip is a `<button>`,
+  so a tap calls `addReaction` and does not toggle the details. The body
+  names who sent it. `getMessageReactions` reads `get_message_reactions`
+  and `get_contacts_by_ids`; contact 1 with no name is "You". A local chat
+  skips that RPC and shows the chips already on the message, with no
+  per-person list. A null RPC result clears the box. Pinned by
+  `tests/message-info.test.mjs`.
   The selection checkbox (`ICO.check`) is separate.
   KEEP (read-receipt lifecycle, verified live 2026-10-02 against real
   accounts — full narrative in `docs/agents/read-receipts.md`): the ONLY
@@ -1256,6 +1282,11 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   boot lands on the chats view WITHOUT going through `setListView`, so the
   initial `.bar-btn.active` is painted directly in the bind-ui slice — don't
   rely on `setListView` to mark it.
+  `#btn-new-chat` is `.bar-btn.bar-accent`. `.bar-btn.active` squares the
+  bottom corners for the view tabs; `.bar-btn.bar-accent.active` restores
+  `border-radius: 8px` on all four (#109). Do not set `box-shadow` on that
+  rule — it would beat the brutal theme's shadow. Pinned by
+  `tests/native-elements.test.mjs`.
   The old `.fab`/`.sidebar-foot` and the sidebar-head Menu button are gone —
   do not resurrect them.
 - **Drawer contract** (ui.js `buildDrawer`): no close button, no offset
@@ -1846,7 +1877,7 @@ next push or the tainted commits come back.
 ### 7.2 Frontend
 
 Regression suites (Node's built-in test runner, no dependencies). Run the
-whole set — 63 files, 487 tests as of 2026-10-12:
+whole set — 65 files, 502 tests as of 2026-10-13:
 
 ```bash
 node --test tests/

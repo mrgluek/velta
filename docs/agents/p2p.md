@@ -254,7 +254,9 @@ Research: https://github.com/pbuzdin/velta/issues/31#issuecomment-5887003522.
   anything for us). Groups it is merely in keep it as an `Introduced` member;
   the confirm dialog (`removePeerImpactText`) says so.
 - Message info shows per-member delivery from `delivery:[{id,name,delivered}]`
-  (cumulative acks vs the message's seq).
+  (cumulative acks vs the message's seq). Reactions in that sheet are the
+  chips already on the message. Local chat does not call
+  `get_message_reactions`, so there is no per-person list.
 
 ### Typing indicator (Phase 5b, after 1.4.56)
 

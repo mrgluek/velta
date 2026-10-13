@@ -562,7 +562,10 @@ The composer has a paper-clip attachment button, and images can also be
 **pasted from the clipboard** (paste a screenshot straight into the composer).
 Both paths run through the same send-image flow: a preview with an optional
 **caption** and a free-form **Crop** step (drag to move the selection, corner
-handle to resize) before sending. The drawer's **Image quality** setting controls what happens to the images
+handle to resize) before sending. Picking two or more photos in the gallery
+sends each one immediately as its own message, with no caption strip. One
+photo still stops in the strip. In the browser, several photos at once need
+the Velta app. The drawer's **Image quality** setting controls what happens to the images
 you send: **Standard** compresses large photos down to 940 KB, **Compact**
 down to 130 KB (smaller photos are sent unchanged either way). Compact keeps
 uploads small and relay storage lasting longer. With **Compress photos to save relay
@@ -678,7 +681,7 @@ Hovering a message on desktop shows a small **Reply** pill along the bubble's ri
 
 On a phone, swipe a bubble to the right to reply. The bubble slides a short way with your finger, and letting go far enough sets the reply and focuses the composer, the same as Reply in the menu. A short swipe snaps the bubble back. Swipe left on the message history to go back to the chat list: the chat screen follows your finger, the list shows underneath, and letting go far enough leaves the chat, the same as the back button. A short swipe snaps back. Scrolling up and down stays a scroll. A read-only chat can swipe back, and it does not swipe to reply. Neither swipe runs on desktop.
 
-On a phone, long-press a bubble and choose **Select text**. The whole message starts selected, and the native handles shrink that span. **Reply**, **Copy**, and **Close** sit inside the bubble: Reply quotes just the selected text, Copy copies that span, and Close leaves the mode and dismisses the handles. While that bar is open, a long-press does not open the message menu. The desktop message menu has no Select text. Select with the mouse as usual; on desktop a small Reply chip quotes the selection (the floating chip is desktop-only — touch quotes through this Select-text flow).
+On a phone, long-press a bubble to open the message menu. That hold does not start the system's text selection. Choose **Select text** when you want the handles. The whole message starts selected, and the native handles shrink that span. **Reply**, **Copy**, and **Close** sit inside the bubble: Reply quotes just the selected text, Copy copies that span, and Close leaves the mode and dismisses the handles. While that bar is open, a long-press does not open the message menu. The desktop message menu has no Select text. Select with the mouse as usual; on desktop a small Reply chip quotes the selection (the floating chip is desktop-only — touch quotes through this Select-text flow).
 
 Note: other Delta Chat clients render only the core's markdown subset (bold, italic, strikethrough, code). Underline and lists are Velta-side rendering niceties — other clients show those markers literally.
 
@@ -713,7 +716,9 @@ Outgoing messages show where they are in the pipeline:
 - **Red !** — the send failed permanently; the bubble shows the reason and
   Retry/Remove actions. **Message info** (context menu) shows when it was
   sent and received, Seen and Encrypted, the database id, the Message-ID,
-  and the server URL (one line per copy on the server).
+  and the server URL (one line per copy on the server). Each reaction is
+  listed there, with the people who sent it. Tap a reaction to send the
+  same one.
 
 Long-press/right-click one of your own messages and pick **Resend** to push
 the same message through the pipeline again — useful when the recipient says
