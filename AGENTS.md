@@ -58,11 +58,12 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   │   ├── bare-links.js     # scheme-less link detection (t.me/x, example.com) for markdown.js: TLD tiers, boundaries (#85)
 │   │   ├── media.js          # media URL helpers: blobfile:// protocol (boot-probed) → loopback server → asset protocol + per-element fallback
 │   │   ├── p2p.js            # Local chat UI: drawer toggle, list card, pairing, legacy 1:1 modal (Tauri only)
+│   │   ├── tunnel.js         # optional Android DNS tunnel UI: deep link, drawer row, settings sheet, diagnostics (#116/#119/#128)
 │   │   ├── read-markers.js   # manual "read up to here" markers per (account, chat), localStorage-only
 │   │   ├── qr-actions.js     # QR screen logic: scan-tab/share availability, copy/share link, scanned-code classification (#37)
 │   │   ├── share-in.js       # inbound share (#97): text/file payloads; invite and chat links stay on the deeplink router
 │   │   ├── qr-scan.js        # code acquisition: paste or camera scan (native BarcodeDetector probed with a 2s timeout, vendored jsQR fallback (`app/vendor/jsQR.js`, minified ~131 KB, loaded on demand) — many Android WebViews ship no Shape Detection API or one whose detect() hangs)
-│   │   ├── format.js         # time/size/pageBounds helpers; timeTag/stampTime emit <time datetime>
+│   │   ├── format.js         # time/size/pageBounds helpers; timeTag/stampTime emit <time datetime>; formatSplashVersion (#127)
 │   │   ├── mock-core.js      # in-memory demo core implementing the JSON-RPC surface (NOT in the prod import graph: transport imports it dynamically)
 │   │   ├── rpc-core.js       # JsonRpcCore wrapper over transports + event mapping
 │   │   ├── transport.js      # backend auto-detection (Tauri, WebSocket, HTTP, mock)
@@ -1926,14 +1927,14 @@ Skip Lighthouse for the installed app; it's only weakly useful for PWA mode.
 ### 6.6 Public-repo hygiene — private relay identifiers (hard rule)
 
 This repo is public; the operator's relay is private. NEVER commit the
-relay's domain, its IP, the hosting-provider name, or bare `a7` used as a
-host — not in code, docs, tests, commit messages, issue text, or release
+relay's domain, its IP, the hosting-provider name, or the short host
+label — not in code, docs, tests, commit messages, issue text, or release
 notes. Docs and tests use `relay.example.org` / `<relay-domain>` /
 `<relay-ip>` placeholders. Before EVERY push, this sweep must be empty
 (binary PNG hits are fine):
 
 ```bash
-git grep -nE "a7\.velta\.cc|aeza|95\.181\.162\.170|\ba7\b" -- '*.md' '*.mjs' '*.js' '*.rs' '*.toml' '*.json'
+git grep -nE "aeza|95\.181\.162\.170|\ba7\b" -- '*.md' '*.mjs' '*.js' '*.rs' '*.toml' '*.json'
 ```
 
 On 2026-10-09 the identifiers leaked into 6 commits across 2 sessions and
@@ -1963,7 +1964,7 @@ next push or the tainted commits come back.
 ### 7.2 Frontend
 
 Regression suites (Node's built-in test runner, no dependencies). Run the
-whole set — 66 files, 516 tests as of 2026-10-13:
+whole set — 70 files, 529 tests as of 2026-10-14:
 
 ```bash
 node --test tests/
@@ -1980,8 +1981,11 @@ funnel (`sync-only-active.test.mjs`), wasm worker boot/checkpoint ordering
 driven through the real worker script (`wasm-boot-order.test.mjs`), the
 identity-backup crypto + restore-ordering pins (`identity-backup.test.mjs`),
 the refresh lock wait (`wasm-session.test.mjs`),
+numbered OPFS snapshots + sqlite export (`wasm-opfs-snapshot.test.mjs`),
+identity-restore checkpoint-before-reload and SW update (`pwa-update-and-restore.test.mjs`),
 backup export naming/gating + gzip round-trip (`backup-export.test.mjs`),
-PWA notifications + wake-lock wiring (`pwa-notify-wakelock.test.mjs`), and
+PWA notifications + wake-lock wiring (`pwa-notify-wakelock.test.mjs`),
+the splash version line (`splash-version.test.mjs`), and
 the modal-history
 contract — join-invite confirms AND the add-relay reopen points
 (`join-invite-flow.test.mjs`).
@@ -2682,9 +2686,10 @@ do-not-regress rules; dates mark when the lesson was learned.
   and do not add the Proxies drawer that issue asked for. The core is the
   database and the message model. `core/src/transport.rs` is one IMAP/SMTP
   relay, not a plugin slot. Local chat wraps the booted core and does not
-  replace it. The opt-in Android DNS tunnel (#116/#119) is not a Proxies
+  replace it. The opt-in Android DNS tunnel (#116/#119/#128) is not a Proxies
   drawer either: it reuses that one `proxy_url` and never overrides a
-  proxy the user set (docs/agents/dns-tunnel.md). A profile with no relay is the welcome splash's "Enter local
+  proxy the user set; Auto stays direct when the relays are down, not
+  blocked (docs/agents/dns-tunnel.md). A profile with no relay is the welcome splash's "Enter local
   chat…". Detail: docs/agents/relays.md, docs/agents/p2p.md.
 - **Encoding (2026-09-23)** — every text file is UTF-8 without BOM; no
   exceptions. On this Windows checkout the ANSI codepage is CP1251

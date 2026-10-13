@@ -378,7 +378,9 @@ profiles around).
 The **Welcome to Velta** splash (full-screen, with the same choices: create a
 new profile on a relay — type the address or scan its QR — **add as second
 device** via a `dcbackup:` code, or **restore from a backup** file) is shown
-only while there is no configured profile. Right after creating a profile it
+only while there is no configured profile. The line above the logo is the
+Velta version, the Chatmail core, and either Tauri or the PWA service-worker
+cache. Right after creating a profile it
 politely asks **"How should we call you?"** — a name is optional, Skip keeps
 the default. Returning users with at least one account boot straight into
 the app.
@@ -456,7 +458,9 @@ Once a link is accepted, the drawer shows a **DNS tunnel** row. It opens a
 sheet with the current route and these modes:
 
 - **Automatic** (default): connect directly while the relays answer, and use
-  the tunnel only when nothing but allowlisted sites works.
+  the tunnel only when nothing but allowlisted sites works. If the relays
+  also fail through the tunnel they are down, not blocked, so mail stays
+  direct.
 - **Always**: every connection goes through the tunnel.
 - **Off**: never use the tunnel.
 
@@ -464,7 +468,7 @@ The sheet also has diagnostics you can share and a button to remove the
 tunnel. The tunnel runs as a local SOCKS5 proxy set as each profile's
 `proxy_url`. A proxy you configured yourself always wins over it. Backups and
 second-device transfers leave the tunnel proxy out. Contributed by
-[@mrgluek](https://github.com/mrgluek) (#116, #119). Details:
+[@mrgluek](https://github.com/mrgluek) (#116, #119, #128). Details:
 [`docs/agents/dns-tunnel.md`](docs/agents/dns-tunnel.md).
 
 </details>
@@ -993,7 +997,8 @@ centered on a soft-black badge for photo-less contacts, and the contact's photo
 as a padded rounded square (with a thin dark ring) for contacts that set one.
 The grid follows the key's fingerprint lines, so the same person looks the
 same on desktop and in the browser. Hex in a display name does not change
-the tile. A contact with no key is colored from their email address.
+the tile. A contact with no key yet (or your own profile before it has an
+address) is the same pattern in greyscale.
 Neighboring cells never share similar hues, all colors are soft (no pure
 black/white), and everything is drawn as pure SVG in `app/js/avatar.js` —
 painted as a CSS background image per tile (one cached image per fingerprint,
@@ -1214,7 +1219,7 @@ is hand-rolled for Velta.
 | [virtual-scroller](https://github.com/catamphetamine/virtual-scroller) (`virtual-scroller-dom`) | Windowed rendering of the message history with variable-height rows, seamless prepends and scroll restoration | [catamphetamine/virtual-scroller](https://github.com/catamphetamine/virtual-scroller) |
 | [Tauri 2](https://github.com/tauri-apps/tauri) | Desktop/Android shell, deep links, sidecar process | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 | [Delta Chat core 2.63.0](https://github.com/chatmail/core) | The messaging engine (Rust): contacts, chats, e2e crypto, IMAP/SMTP | [chatmail/core](https://github.com/chatmail/core) |
-| [soar](https://github.com/getlantern/soar) (Go, via the `mrgluek/soar` fork) | Optional Android DNS tunnel, built by CI into `libsoartunnel.so` | [getlantern/soar](https://github.com/getlantern/soar) |
+| [soar](https://github.com/getlantern/soar) v0.2.0 (Go) | Optional Android DNS tunnel, built by CI into `libsoartunnel.so` | [getlantern/soar](https://github.com/getlantern/soar) |
 
 Both JS libraries are vendored under `app/vendor/` (no bundler, no `node_modules`
 at runtime). UI icons are individual SVGs from [SVG Repo](https://www.svgrepo.com/).
