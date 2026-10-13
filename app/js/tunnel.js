@@ -91,9 +91,9 @@ export function pathLines(paths) {
   return [
     `paths: ${ok}/${rows.length} verified`,
     ...rows.map(p => {
-      const state = p.dead ? "dead" : p.suspended ? "suspended" : p.verified ? "ok" : "unverified";
+      const state = p.suspended ? "suspended" : p.verified ? "ok" : "unverified";
       const rtt = p.rtt ? `${Math.round(p.rtt / 1e6)}ms` : "-";
-      return `  ${p.resolver} ${p.transport} ${state} rtt=${rtt} loss=${(p.loss || 0).toFixed(2)} answers=${p.successes || 0} name=${p.name_len} ans=${p.answer_max}`;
+      return `  ${p.resolver} ${p.transport} ${state} rtt=${rtt} loss=${(p.loss || 0).toFixed(2)} answers=${p.successes || 0} name=${p.name_len} ans=${p.answer_limit || "-"}`;
     }),
   ];
 }
