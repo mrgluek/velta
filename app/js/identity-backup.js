@@ -72,6 +72,64 @@ export function buildIdentityBundle({ addr, mail_pw, keys }) {
   return { kind: "velta-identity", v: 1, addr, mail_pw, keys, exported: new Date().toISOString() };
 }
 
+// list_transports is a flat JSON-RPC login ({ addr, password }). The row
+// stored in the account db keeps that secret under imap.password, and the
+// configured copy uses imap_password. Prefer the sending address when it
+// actually has a password.
+export function mailLoginFromTransports(transports, preferAddr) {
+  const list = Array.isArray(transports) ? transports : [];
+  const passwordOf = (t) => {
+    const v = t?.password || t?.imap?.password || t?.imap_password || "";
+    return typeof v === "string" ? v : "";
+  };
+  const addrOf = (t) => (typeof t?.addr === "string" ? t.addr : "");
+  const usable = list.filter(t => addrOf(t) && passwordOf(t));
+  if (!usable.length) return null;
+  const want = String(preferAddr || "").toLowerCase();
+  const hit = usable.find(t => addrOf(t).toLowerCase() === want) || usable[0];
+  return { addr: addrOf(hit), mailPw: passwordOf(hit) };
+}
+
+// accounts.toml from the wasm core. Only the selected account's directory
+// name — never a path.
+export function accountDirFromToml(toml) {
+  const sel = Number(/selected_account\s*=\s*(\d+)/.exec(String(toml))?.[1]);
+  if (!Number.isInteger(sel)) return null;
+  for (const block of String(toml).split("[[accounts]]").slice(1)) {
+    const id = Number(/\bid\s*=\s*(\d+)/.exec(block)?.[1]);
+    const dir = /\bdir\s*=\s*"([^"]+)"/.exec(block)?.[1];
+    if (id === sel && dir && /^[A-Za-z0-9._-]+$/.test(dir)) return dir;
+  }
+  return null;
+}
+
+function jsonUnescape(s) {
+  try { return JSON.parse(`"${s}"`); } catch { return s; }
+}
+
+// Pull login JSON out of a dc.db byte dump. Login objects are compact and
+// carry certificate_checks or imap_password; a chat message that merely
+// mentions "password" does not.
+export function mailLoginsFromDbText(text) {
+  const out = [];
+  const src = String(text);
+  const re = /\{"addr":"((?:\\.|[^"\\])*)"/g;
+  let m;
+  while ((m = re.exec(src))) {
+    const next = src.indexOf('{"addr":', m.index + 8);
+    const end = next === -1 ? m.index + 4000 : Math.min(next, m.index + 4000);
+    const window = src.slice(m.index, end);
+    if (!window.includes('"certificate_checks"') && !window.includes('"imap_password"')) continue;
+    const imapPw = /"imap_password":"((?:\\.|[^"\\])*)"/.exec(window);
+    const pw = /"password":"((?:\\.|[^"\\])*)"/.exec(window);
+    const mailPw = jsonUnescape((imapPw && imapPw[1]) || (pw && pw[1]) || "");
+    const addr = jsonUnescape(m[1]);
+    if (addr && mailPw) out.push({ addr, password: mailPw });
+    if (re.lastIndex === m.index) re.lastIndex++;
+  }
+  return out;
+}
+
 // #104: full-account backup download name. The archive is the core's .tar
 // byte-identical (not a zip wrapper) so desktop import round-trips without
 // an unzip step.

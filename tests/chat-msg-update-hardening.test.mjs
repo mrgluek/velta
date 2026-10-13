@@ -623,6 +623,56 @@ test("Select text is offered for a caption, Copy text stays plain-text only", as
   assert.equal(html.some(h => h.includes(">Copy text<")), false);
 });
 
+test("Download saves an image, a video, or a file from the message menu", async t => {
+  const { view, node, core } = setup(t);
+  await view.open(7);
+  const item = view.msgIndex.get(10);
+  const labels = () => [...node("popups").querySelector(".ctx-menu").querySelectorAll("button")].map(b => b.innerHTML);
+
+  view._msgContextMenu(item, 4, 4);
+  assert.equal(labels().some(h => h.includes(">Download<")), false, "plain text has no Download");
+
+  node("popups").replaceChildren();
+  item.msg = { ...item.msg, viewtype: "sticker", text: "", filePath: "stickers/a.webp", fileName: "a.webp", downloadState: "Done" };
+  view._msgContextMenu(item, 4, 4);
+  assert.equal(labels().some(h => h.includes(">Download<")), false, "a sticker keeps Save sticker");
+
+  for (const viewtype of ["video", "file"]) {
+    node("popups").replaceChildren();
+    item.msg = { ...item.msg, viewtype, filePath: "blobs/a.bin", fileName: "clip.bin", downloadState: "Done" };
+    view._msgContextMenu(item, 4, 4);
+    assert.ok(labels().some(h => h.includes(">Download<")), viewtype);
+  }
+
+  node("popups").replaceChildren();
+  item.msg = { ...item.msg, viewtype: "image", text: "", fileName: "shot.jpg", filePath: null, downloadState: "Available" };
+  let read = null;
+  core.downloadFullMessage = async (id) => { assert.equal(id, 10); };
+  core.getMessage = async () => ({ ...item.msg, downloadState: "Done", filePath: "/accounts/a/shot.jpg" });
+  core.transport = { readCoreFile: async (path) => { read = path; return new Uint8Array([1, 2, 3]); } };
+  const prevCreate = URL.createObjectURL;
+  const prevRevoke = URL.revokeObjectURL;
+  URL.createObjectURL = () => "blob:velta-test";
+  URL.revokeObjectURL = () => {};
+  t.after(() => {
+    if (prevCreate) URL.createObjectURL = prevCreate;
+    URL.revokeObjectURL = typeof prevRevoke === "function" ? (u) => { try { prevRevoke(u); } catch {} } : () => {};
+  });
+  let saved = null;
+  const orig = document.createElement;
+  document.createElement = (tag) => {
+    const el = orig(tag);
+    if (tag === "a") el.click = () => { saved = el.download; };
+    return el;
+  };
+  view._msgContextMenu(item, 4, 4);
+  const btn = [...node("popups").querySelector(".ctx-menu").querySelectorAll("button")].find(b => b.innerHTML.includes(">Download<"));
+  await btn.fire("click");
+  await wait(50);
+  assert.equal(read, "/accounts/a/shot.jpg");
+  assert.equal(saved, "shot.jpg");
+});
+
 test("a second finger cancels long-press and does not select text", async t => {
   const { view, node } = setup(t);
   await view.open(7);

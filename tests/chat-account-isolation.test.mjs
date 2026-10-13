@@ -309,6 +309,32 @@ test("voice file extension prefers m4a, then ogg, then webm", () => {
   assert.deepEqual(voiceFileExt(t => String(t).startsWith("audio/ogg")), { mime: "audio/ogg;codecs=opus", ext: "ogg" });
 });
 
+test("a pwa image send writes the blob into the wasm core", async t => {
+  const { view, core } = setup(t);
+  await view.open(7);
+  const session = view._session;
+  window.__TAURI__ = undefined;
+  const writes = [];
+  core.transport = { writeCoreFile: async (path, bytes) => { writes.push({ path, n: bytes.length }); } };
+  let sent;
+  core.sendMessage = async (_id, data) => { sent = data; return message(99); };
+  const blob = new Blob([Uint8Array.from([9, 8, 7])], { type: "image/png" });
+  view.pendingMedia = { kind: "image", blob, url: "blob:pending", corePath: null, name: "shot.png" };
+  const orig = URL.revokeObjectURL;
+  URL.revokeObjectURL = () => {};
+  try {
+    await view._sendPendingMedia(session);
+  } finally {
+    URL.revokeObjectURL = orig;
+  }
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].n, 3);
+  assert.match(writes[0].path, /^\/uploads\/image-\d+\.png$/);
+  assert.equal(sent.file, writes[0].path);
+  assert.equal(sent.filename, "shot.png");
+  assert.equal(sent.viewtype, "image");
+});
+
 test("a voice send includes the recording file", async t => {
   const { view, core } = setup(t);
   await view.open(7);

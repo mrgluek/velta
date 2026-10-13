@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { probeC3Relay } from "../app/js/ws-relays.js";
+import { probeC3Relay, probeDnsVia } from "../app/js/ws-relays.js";
 
 // Stub the WebSocket global: probeC3Relay must decide from the FIRST text
 // frame only — a JSON array with at least one entry (the relay's own name
@@ -51,6 +51,14 @@ test("probe: empty array, error page text, handshake failure, silence all fail",
   assert.equal(await p, false, "close without answering");
 }));
 
+test("probeDnsVia asks the active tunnel about the other host", () => withFakeWS(async () => {
+  assert.equal(await probeDnsVia("not a host", "relay.example.org"), false);
+  const p = probeDnsVia("relay.example.org", "mail.example.org");
+  assert.equal(FakeWS.instances[0].url, "wss://relay.example.org/dns/mail.example.org");
+  FakeWS.instances[0].serve('["9.9.9.9"]');
+  assert.equal(await p, true);
+}));
+
 test("create-account gates: probe before create, auto-switch with reload resume", () => {
   const app = readFileSync(new URL("../app/js/app.js", import.meta.url), "utf8")
     .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n]*/g, " ");
@@ -60,4 +68,18 @@ test("create-account gates: probe before create, auto-switch with reload resume"
   assert.equal(app.split("ensureMailTunnelForLink(link)").length - 1, 4, "splash form + modal add + deeplink-new + the definition");
   assert.ok(app.includes('sessionStorage.getItem("velta-pending-add")'), "boot resumes the interrupted create");
   assert.ok(app.includes("sessionStorage.removeItem(\"velta-pending-add\")"), "resume removes the stash before use — no reload loops");
+  assert.ok(app.includes("probeDnsVia(via, host)"), "a non-C3 host stays on the tunnel that can resolve it");
+  assert.ok(app.includes('probeDnsVia(via, "example.com")'), "autopick refuses a tunnel that only resolves itself");
+});
+
+test("worker rewrites stock chatmail POST /new onto this origin", () => {
+  const src = readFileSync(new URL("../app/js/worker-wasm.js", import.meta.url), "utf8");
+  const page = { href: "https://relay.example.org/app/worker-wasm.js", origin: "https://relay.example.org", hostname: "relay.example.org" };
+  const self = { postMessage() {}, location: page };
+  const chatmailNewUrl = new Function("self", "navigator", "setInterval", src + "\nreturn chatmailNewUrl;")(self, {}, () => ({}));
+  assert.equal(chatmailNewUrl("https://mail.example.org/new", { method: "POST" }, page), "https://relay.example.org/cm-new/mail.example.org");
+  assert.equal(chatmailNewUrl("https://mail.example.org/new?t=abc", { method: "POST" }, page), "https://relay.example.org/cm-new/mail.example.org?t=abc");
+  assert.equal(chatmailNewUrl("https://relay.example.org/new", { method: "POST" }, page), null);
+  assert.equal(chatmailNewUrl("https://mail.example.org/other", { method: "POST" }, page), null);
+  assert.equal(chatmailNewUrl("https://127.0.0.1/new", { method: "POST" }, page), null);
 });

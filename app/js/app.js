@@ -10,7 +10,7 @@ import { initCalls } from "./calls.js";
 import { initWebxdc } from "./webxdc-manager.js";
 import { diagnosticsSink, DiagnosticsStore, DIAGNOSTICS_CHAT_ID, diagnosticRow, isSendFailureDiagnostic, createRelaySendErrorState } from "./diagnostics.js";
 import { parseInviteLink, inviteLabel, bindInviteInterception, showInviteDomainsModal, isShortInviteLink, expandShortInvite } from "./invites.js";
-import { activeWsRelay, addWsRelay, listWsRelays, normalizeHost, probeC3Relay, showWsRelaysModal, useWsRelay } from "./ws-relays.js";
+import { activeWsRelay, addWsRelay, listWsRelays, normalizeHost, probeC3Relay, probeDnsVia, showWsRelaysModal, useWsRelay } from "./ws-relays.js";
 import { buildDrawer, showModal, showContextMenu, toast, closeAllPopups, confirmModal, showInvite, showEditProfile, notifyIncoming, setCoreVersionDisplay, checkForUpdate, popoverSupported } from "./ui.js";
 import { p2pAvailable, p2pEnabled, setP2pEnabled, pairNearbyFlow, showInviteModal, addContact, showCreateGroupModal, showAddMembersModal } from "./p2p.js";
 import { withLocalChat, hubModel, renameDevice, removePeer, dismissLocalGroup, groupRename, groupRemoveMember, peerGroupImpact, groupActionsModel, groupMemberHint, removePeerImpactText, lcQueueItems, retryQueuedItem, cancelQueuedItem } from "./local-chat.js";
@@ -20,7 +20,7 @@ import { scanTabAvailable, canShareLink, copyLink, shareLink, classifyScannedCod
 import { parseSharePayload, shareTextIfUnconsumed, sharePlan, createShareInbox, buildSharePicker } from "./share-in.js";
 import { linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_LABELS } from "./link-preview.js";
 import { extractTunnelLink, acceptTunnelLink, openTunnelSettings, refreshTunnelStatus, tunnelInstalled, tunnelStatus, describeTunnel, bindTunnelNetworkEvents, initTunnelDiagnostics } from "./tunnel.js";
-import { wrapIdentityBundle, unwrapIdentityBundle, buildIdentityBundle, bytesToBase64, base64ToBytes, backupDownloadName, gzipBytes } from "./identity-backup.js";
+import { wrapIdentityBundle, unwrapIdentityBundle, buildIdentityBundle, bytesToBase64, base64ToBytes, backupDownloadName, gzipBytes, mailLoginFromTransports, accountDirFromToml, mailLoginsFromDbText } from "./identity-backup.js";
 
 const diagnostics = new DiagnosticsStore();
 window.__veltaDiagnostics = diagnostics;
@@ -372,7 +372,11 @@ coreStartupPromise = createCore({
 
 try {
   core = withLocalChat(await coreStartupPromise);
-  setFingerprintSource((contactId) => core.getContactEncryptionInfo(contactId), core.accountId);
+  setFingerprintSource(
+    (contactId) => core.getContactEncryptionInfo(contactId),
+    core.accountId,
+    { addrOf: async (contactId) => (await core.getContact(contactId))?.addr || "" },
+  );
 } catch (error) {
   diagnostics.append("error", `Core startup crashed: ${error?.message || error}`);
   diagnostics.append("warning", "Continuing in demo mode so diagnostics and recovery controls remain available");
@@ -481,7 +485,11 @@ core.addEventListener("account-changing", () => {
 });
 core.addEventListener("account-changed", () => {
   state.accountChanging = false;
-  setFingerprintSource(contactId => core.getContactEncryptionInfo(contactId), core.accountId);
+  setFingerprintSource(
+    (contactId) => core.getContactEncryptionInfo(contactId),
+    core.accountId,
+    { addrOf: async (contactId) => (await core.getContact(contactId))?.addr || "" },
+  );
   accountRefreshPromise = Promise.all([refreshAccounts(), refreshChatList()]);
 });
 
@@ -1396,7 +1404,7 @@ async function renderContactsView() {
     b.type = "button";
     b.className = "chat-item contact-row";
     b.innerHTML = `
-      <velta-avatar name="${escapeAttr(c.name)}" color="${escapeAttr(c.color || "#777")}" size="42" contact-id="${c.id}"${c.avatar ? ` avatar="${escapeAttr(fileUrl(c.avatar))}"` : ""}></velta-avatar>
+      <velta-avatar name="${escapeAttr(c.name)}" color="${escapeAttr(c.color || "#777")}" size="42" contact-id="${c.id}" addr="${escapeAttr(c.addr || "")}"${c.avatar ? ` avatar="${escapeAttr(fileUrl(c.avatar))}"` : ""}></velta-avatar>
       <div class="ci-name">${escapeHtml(c.name)}</div>`;
     b.addEventListener("click", async () => {
       try {
@@ -3585,7 +3593,11 @@ async function ensureMailTunnelForLink(link) {
   if (!host || activeWsRelay() === host) return true;
   toast(`Checking ${host}…`);
   if (!(await probeC3Relay(host))) {
-    errToast(`${host} doesn't answer browser mail (no WebSocket endpoints) — use the Velta app for it, or a relay that supports the PWA, e.g. the one serving this app.`, 7000);
+    // Stock chatmail has no tunnel. Keep the proxy already in use when it
+    // resolves this host (it dials that relay's real mail ports).
+    const via = activeWsRelay();
+    if (via && await probeDnsVia(via, host)) return true;
+    errToast(`${host} doesn't answer browser mail, and ${via || "this page"} can't reach it either. Use the Velta app, or a WebSocket relay that dials other relays.`, 7000);
     return false;
   }
   if (!listWsRelays().includes(host)) addWsRelay(host);
@@ -4111,17 +4123,35 @@ async function runBackupExport(pass) {
   return name;
 }
 
+async function mailLoginForBackup() {
+  const prefer = state.account?.addr;
+  let transports = [];
+  try { transports = await core.listTransports(); } catch { /* the db still has the login */ }
+  const fromRpc = mailLoginFromTransports(transports, prefer);
+  if (fromRpc) return fromRpc;
+  // ponytail: list_transports can come back without a password while the
+  // account db still has it (nested entered_param, or imap_password on the
+  // configured copy). A core call that always returns the secret replaces this.
+  const read = core.transport?.readCoreFile?.bind(core.transport);
+  if (!read) return null;
+  let dir = null;
+  try {
+    dir = accountDirFromToml(new TextDecoder().decode(await read("/accounts/accounts.toml")));
+  } catch { return null; }
+  if (!dir) return null;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: false }).decode(await read(`/accounts/${dir}/dc.db`));
+    return mailLoginFromTransports(mailLoginsFromDbText(text), prefer);
+  } catch { return null; }
+}
+
 async function runIdentityExport(pass) {
   if (!pass || pass.length < 8) throw new Error("Use a passphrase of at least 8 characters — this file IS your account");
-  // core 2.63.0 removed the legacy addr/mail_pw configs — credentials now
-  // live in the transports list (imap.password). Prefer the sending address.
-  const transports = await core.listTransports();
-  const byAddr = state.account?.addr
-    ? transports.find(t => String(t.addr || "").toLowerCase() === String(state.account.addr).toLowerCase())
-    : null;
-  const transport = byAddr || transports.find(t => t.imap?.password) || transports[0];
-  const addr = transport?.addr;
-  const mailPw = transport?.imap?.password;
+  // core 2.63.0 removed the legacy addr/mail_pw configs. The login is the
+  // transport (flat password or the db's imap.password). Prefer the sending address.
+  const login = await mailLoginForBackup();
+  const addr = login?.addr;
+  const mailPw = login?.mailPw;
   if (!addr || !mailPw) throw new Error("This profile is not configured yet — nothing to back up");
   const dir = "/identity/export";
   await core.exportSelfKeys(core.accountId, dir, pass);
@@ -4343,6 +4373,18 @@ function rebuildDrawer() {
       try {
         await setP2pEnabled(enable);
         toast(enable ? "Local chat enabled" : "Local chat disabled");
+        if (!enable) {
+          const id = String(state.activeChatId || "");
+          if (id.startsWith("p2p:") || id.startsWith("p2pg:")) closeChatUI();
+          refreshChatList();
+          // The browser can enter local chat from the splash and has no
+          // engine. Turning it off must bring setup back on an unconfigured
+          // profile, or the preview is the only screen left.
+          if (state.account?.configured === false && !document.getElementById("splash")) {
+            splashSession = showSplash();
+            splashSession?.showActions();
+          }
+        }
       } catch (error) {
         diagnostics.append("error", `Local chat toggle failed: ${error?.message || error}`);
         errToast(`Local chat toggle failed: ${error?.message || error}`, 5000);
@@ -4903,6 +4945,17 @@ function showSplash() {
   // grows to ~3 relays in the background afterwards.
   el.querySelector("[data-auto]")?.addEventListener("click", async () => {
     if (!accountIsCurrent(epoch) || !core.initTransports) return;
+    // The core probes its relay pool through the one tunnel set at boot.
+    // example.com is the canary: a locked tunnel resolves only itself.
+    if (window.VELTA_PWA?.wasmCore) {
+      const via = activeWsRelay();
+      if (!via || !(await probeDnsVia(via, "example.com"))) {
+        errToast(via
+          ? `${via} can't reach other relays from this browser yet.`
+          : "Add a WebSocket relay before autopick can run in the browser.", 7000);
+        return;
+      }
+    }
     await runCreate({
       trigger: el.querySelector("[data-auto]"),
       intro: "Looking for a fast relay…",

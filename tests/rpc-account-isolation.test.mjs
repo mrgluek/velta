@@ -341,6 +341,12 @@ test("mock deleteChat removes the chat instead of clearing its messages", async 
   assert.equal(mock.chats.some(c => c.id === chat.id), false);
 });
 
+test("configureWithCredentials sends a flat login with a top-level password", async () => {
+  const { core, calls } = fixture({ add_transport: () => {} });
+  await core.configureWithCredentials("source@example.org", "secret");
+  assert.deepEqual(calls, [["add_transport", A, { addr: "source@example.org", password: "secret" }]]);
+});
+
 test("getAllAccounts marks the selection captured before its first await", async () => {
   const gate = deferred();
   const { core } = fixture({ get_all_account_ids: () => gate.promise });

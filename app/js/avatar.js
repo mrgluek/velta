@@ -106,18 +106,27 @@ export function fingerprintGroups(fpr) {
   return hex.slice(0, 40).match(/.{4}/g);
 }
 
+// Address inside the first "(user@host)" of an encryption-info block.
+function blockAddr(block) {
+  const m = String(block).match(/\(([^()\s]+@[^()\s]+)\)/);
+  return m ? m[1].toLowerCase() : "";
+}
+
 // Pull the contact's fingerprint out of get_contact_encryption_info output.
-// The info contains a "Me (...):" block and one block per other key owner
-// ("<name> (<addr>):"), each followed by the grouped fingerprint.
+// Blocks look like "<name> (<addr>):" plus the grouped fingerprint. Only the
+// fingerprint lines count: a display name or a chatmail address can itself
+// contain 4 hex characters, and desktop and the PWA often store different
+// names for the same key, which used to slice that key into two tiles.
 export function parseFingerprint(encrInfo, contactAddr) {
   if (!encrInfo) return null;
-  const blocks = encrInfo.split(/\n\s*\n/).filter((b) => b.includes("("));
+  const blocks = String(encrInfo).split(/\n\s*\n/).filter((b) => b.includes("("));
   if (!blocks.length) return null;
-  let block = null;
-  if (contactAddr) block = blocks.find((b) => b.toLowerCase().includes(String(contactAddr).toLowerCase()));
+  const want = String(contactAddr || "").trim().toLowerCase();
+  let block = want ? blocks.find((b) => blockAddr(b) === want) : null;
   if (!block) block = blocks.find((b) => !/^\s*me\b/i.test(b.trim()));
   if (!block) return null;
-  const hex = (block.match(/[0-9A-Fa-f]{4}/g) || []).join("");
+  const lines = block.match(/(?:[0-9A-Fa-f]{4} ){4}[0-9A-Fa-f]{4}/g) || [];
+  const hex = lines.join("").replace(/[^0-9A-Fa-f]/g, "");
   return hex.length >= 40 ? hex.slice(0, 40).toUpperCase() : null;
 }
 
@@ -233,10 +242,15 @@ export function avatarBackgroundUrl({ groups, badge = true }) {
 const fprCache = new Map(); // `${accountId}:${contactId}` -> Promise<fingerprint|null>
 let fingerprintSource = null;
 let fingerprintAccountId = null;
+// (contactId) => address. Used when the tile was not given one, so a contact
+// with no key yet hashes the address (stable across devices) instead of the
+// per-database contact id.
+let addrOf = null;
 
-export function setFingerprintSource(fn, accountId = null) {
+export function setFingerprintSource(fn, accountId = null, extras = null) {
   fingerprintSource = fn;
   fingerprintAccountId = accountId;
+  addrOf = typeof extras?.addrOf === "function" ? extras.addrOf : null;
 }
 
 export function cachedFingerprint(contactId) {
@@ -248,10 +262,17 @@ export function fingerprintFor(contactId, addr) {
   const key = `${fingerprintAccountId}:${contactId}`;
   if (fprCache.has(key)) return fprCache.get(key);
   if (!fingerprintSource || !contactId || contactId < 1) return Promise.resolve(null);
-  const p = Promise.resolve()
-    .then(() => fingerprintSource(contactId))
-    .then((encrInfo) => parseFingerprint(encrInfo, addr) || deriveFingerprint(addr || "id:" + contactId))
-    .catch(() => deriveFingerprint(addr || "id:" + contactId));
+  // Self (contact 1) makes get_contact_encryption_info throw; the address
+  // still paints the same tile on every device that has that address.
+  const infoP = Promise.resolve().then(() => fingerprintSource(contactId)).catch(() => "");
+  const whoP = (addr || !addrOf)
+    ? Promise.resolve(addr || "")
+    : Promise.resolve().then(() => addrOf(contactId)).then((a) => a || "").catch(() => "");
+  const p = Promise.all([infoP, whoP]).then(([encrInfo, who]) => {
+    const parsed = parseFingerprint(encrInfo, who);
+    if (parsed) return parsed;
+    return deriveFingerprint(who || "id:" + contactId);
+  });
   fprCache.set(key, p);
   p.then((fpr) => { p.value = fpr; }).catch(() => {});
   return p;

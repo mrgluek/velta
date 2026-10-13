@@ -7,6 +7,32 @@
 let dc = null;
 let glue = null;
 
+// Stock chatmail POST /new has no CORS header, so the browser cannot read
+// the minted address. /cm-new/<host> on this origin is the relay proxy.
+// ponytail: pathname /new only; a /new_email QR still goes direct.
+function chatmailNewUrl(input, init, page) {
+  try {
+    const raw = typeof input === "string" ? input : input?.url;
+    if (!raw || !page?.origin) return null;
+    const url = new URL(raw, page.href);
+    const method = String(init?.method || input?.method || "GET").toUpperCase();
+    if (method !== "POST" || url.pathname !== "/new" || url.port || url.hostname === page.hostname) return null;
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}$/.test(url.hostname)) return null;
+    return new URL("/cm-new/" + url.hostname + url.search, page.origin).href;
+  } catch {
+    return null;
+  }
+}
+
+const _fetch = typeof self.fetch === "function" ? self.fetch.bind(self) : null;
+if (_fetch) {
+  self.fetch = (input, init) => {
+    const proxied = chatmailNewUrl(input, init, self.location);
+    if (!proxied) return _fetch(input, init);
+    return _fetch(proxied, { method: "POST", redirect: init?.redirect, signal: init?.signal });
+  };
+}
+
 async function opfsRoot() {
   try {
     return navigator.storage?.getDirectory ? await navigator.storage.getDirectory() : null;
@@ -37,7 +63,16 @@ async function restore(root) {
 // renames between checkpoints propagate on the next restore. The snapshot is
 // staged in memory first: removeEntry must not run unless the memfs walk
 // fully succeeded, or a mid-walk throw would leave OPFS wiped (#106).
-async function checkpoint() {
+// One snapshot at a time. A refresh flush and the interval must not both
+// removeEntry the OPFS tree.
+let checkpointChain = Promise.resolve();
+function checkpoint() {
+  const run = checkpointChain.then(snapshot, snapshot);
+  checkpointChain = run.then(() => {}, () => {});
+  return run;
+}
+
+async function snapshot() {
   const root = await opfsRoot();
   if (!root || !glue) return;
   const files = [];

@@ -37,11 +37,20 @@ function storedList() {
   }
 }
 
+// A PWA served by its relay has no baked proxy (the dist must not carry a
+// private hostname). The page host is that tunnel until the user picks one.
+function pageHost() {
+  try { return normalizeHost(globalThis.location?.hostname) || ""; }
+  catch { return ""; }
+}
+
 export function listWsRelays() {
   const stored = storedList();
   if (stored && stored.length) return stored;
   const baked = bakedHost();
-  return baked ? [baked] : [];
+  if (baked) return [baked];
+  const page = pageHost();
+  return page ? [page] : [];
 }
 
 export function activeWsRelay() {
@@ -58,7 +67,9 @@ export function wsProxyUrl() {
   if (stored && active && stored.includes(active)) return `wss://${active}`;
   const baked = bakedProxyUrl();
   if (baked) return baked;
-  return stored?.[0] ? `wss://${stored[0]}` : null;
+  if (stored?.[0]) return `wss://${stored[0]}`;
+  const page = pageHost();
+  return page ? `wss://${page}` : null;
 }
 
 function write(list, active) {
@@ -105,10 +116,11 @@ export function useWsRelay(host) {
 // origin-gate 403, an HTML error page, silence — means this PWA cannot
 // tunnel mail there (relays gate browser origins, so "capable" here always
 // means "capable from THIS app's origin", which is what matters).
-export function probeC3Relay(host) {
+function probeDns(url) {
   return new Promise((resolve) => {
     let done = false;
     let ws = null;
+    let timer = null;
     const finish = (v) => {
       if (done) return;
       done = true;
@@ -116,15 +128,14 @@ export function probeC3Relay(host) {
       try { ws?.close(); } catch {}
       resolve(v);
     };
-    try { ws = new WebSocket(`wss://${host}/dns/${host}`); }
+    timer = setTimeout(() => finish(false), 5000);
+    try { ws = new WebSocket(url); }
     catch { return finish(false); }
-    const timer = setTimeout(() => finish(false), 5000);
     ws.onmessage = (ev) => {
       if (typeof ev.data !== "string") return finish(false);
       try {
         const v = JSON.parse(ev.data);
-        // Non-empty: the relay's own name must resolve, or the core would
-        // still die at DNS (a relay answering [] for itself is broken).
+        // Non-empty: [] is a relay that will not dial this name.
         finish(Array.isArray(v) && v.length > 0);
       }
       catch { finish(false); }
@@ -132,6 +143,21 @@ export function probeC3Relay(host) {
     ws.onerror = () => finish(false);
     ws.onclose = () => finish(false);
   });
+}
+
+// The relay's own /dns/<itself>. A capable relay answers with a JSON IP array.
+export function probeC3Relay(host) {
+  return probeDns(`wss://${host}/dns/${host}`);
+}
+
+// Whether the active tunnel will resolve some other mail host. Stock
+// chatmail has no tunnel; create-account and autopick use this to stay on
+// the page's proxy instead of switching to a host that cannot answer.
+export function probeDnsVia(proxyHost, name) {
+  const proxy = normalizeHost(proxyHost);
+  const host = normalizeHost(name);
+  if (!proxy || !host) return Promise.resolve(false);
+  return probeDns(`wss://${proxy}/dns/${host}`);
 }
 
 function esc(s) {

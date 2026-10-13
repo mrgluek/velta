@@ -18,6 +18,16 @@ test("an untouched PWA keeps the baked websocket URL and shows that domain", () 
   assert.equal(wsProxyUrl(), "wss://relay.example.org");
 });
 
+test("an empty bake uses the page host, and localhost stays proxy-less", () => {
+  store("");
+  globalThis.location = { hostname: "relay.example.org" };
+  assert.deepEqual(listWsRelays(), ["relay.example.org"]);
+  assert.equal(wsProxyUrl(), "wss://relay.example.org");
+  globalThis.location = { hostname: "localhost" };
+  assert.deepEqual(listWsRelays(), []);
+  assert.equal(wsProxyUrl(), null);
+});
+
 test("add, edit, use, and delete relay domains", () => {
   store();
   assert.equal(addWsRelay("https://Nine.TestRun.org/new"), "nine.testrun.org");

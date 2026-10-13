@@ -345,7 +345,7 @@ class VeltaChatItem extends Elena(HTMLElement) {
         : c.lastMsg ? escapeHtml(c.lastMsg) : "";
     return html`
       <div class="chat-item${this.active !== null && this.active !== undefined && this.getAttribute("active") !== null ? " active" : ""}" role="option">
-        ${unsafeHTML(`<velta-avatar name="${escapeAttr(c.name)}" color="${c.avatarColor || ""}" kind="${c.kind}" size="48"${c.contactId ? ` contact-id="${c.contactId}"` : ""}${c.avatar ? ` avatar="${escapeAttr(fileUrl(c.avatar))}"` : ""}></velta-avatar>`)}
+        ${unsafeHTML(`<velta-avatar name="${escapeAttr(c.name)}" color="${c.avatarColor || ""}" kind="${c.kind}" size="48"${c.contactId ? ` contact-id="${c.contactId}"` : ""}${c.contact?.addr ? ` addr="${escapeAttr(c.contact.addr)}"` : ""}${c.avatar ? ` avatar="${escapeAttr(fileUrl(c.avatar))}"` : ""}></velta-avatar>`)}
         <div class="ci-main">
           <div class="ci-top">
             <div class="ci-name">${c.name} ${unsafeHTML(nameBadges)}</div>
@@ -404,7 +404,7 @@ class VeltaChatHead extends Elena(HTMLElement) {
       : escapeHtml(stText);
     return html`
       <div class="chat-head-avatar">
-        ${unsafeHTML(`<velta-avatar name="${escapeAttr(c.name)}" color="${c.avatarColor || ""}" kind="${c.kind}" size="42"${c.contactId ? ` contact-id="${c.contactId}"` : ""}${c.avatar ? ` avatar="${escapeAttr(fileUrl(c.avatar))}"` : ""}></velta-avatar>`)}
+        ${unsafeHTML(`<velta-avatar name="${escapeAttr(c.name)}" color="${c.avatarColor || ""}" kind="${c.kind}" size="42"${c.contactId ? ` contact-id="${c.contactId}"` : ""}${c.contact?.addr ? ` addr="${escapeAttr(c.contact.addr)}"` : ""}${c.avatar ? ` avatar="${escapeAttr(fileUrl(c.avatar))}"` : ""}></velta-avatar>`)}
       </div>
       <div class="chat-head-text">
         <div class="cht-name"><span class="cht-name-text">${c.name}</span>${unsafeHTML(nameBadgesFor(c))}</div>

@@ -2,6 +2,29 @@
 // { name, send(line), setReceiver(fn) } by hosting the wasm core in a
 // module worker (worker-wasm.js). Feature-detect at the boot site decides
 // between this and the Tauri/WS transports (no __TAURI__ + PWA + wasm flag).
+// A reload starts the new page while the previous document still holds
+// velta-wasm-core. ifAvailable would fail that race and the app would boot
+// the empty demo instead of the saved account. A real second tab still
+// holds the lock after the grace period.
+export async function acquireWasmLock(request, onHeld, waitMs = 1500) {
+  if (typeof request !== "function") return true;
+  const once = () => new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok) => { if (!settled) { settled = true; resolve(!!ok); } };
+    request("velta-wasm-core", { ifAvailable: true }, (lock) => {
+      finish(!!lock);
+      if (!lock) return;
+      return new Promise((release) => { onHeld(release); });
+    }).catch(() => finish(false));
+  });
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    if (await once()) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
 export class WorkerWasmTransport {
   constructor({
     workerUrl = new URL("./worker-wasm.js", import.meta.url).href,
@@ -56,26 +79,27 @@ export class WorkerWasmTransport {
     });
   }
 
+  // Ask the worker to copy memfs → OPFS. Refresh kills the worker; the
+  // 8s interval alone never runs for that last session.
+  checkpoint() {
+    this._worker?.postMessage({ type: "checkpoint" });
+  }
+
   async _boot() {
     // Single-tab gate: two live cores would race the OPFS snapshot. Hold the
     // lock for the worker's lifetime; a second tab gets a clear error.
-    if (navigator.locks?.request) {
-      const acquired = await new Promise((resolve) => {
-        navigator.locks
-          .request("velta-wasm-core", { ifAvailable: true }, (lock) => {
-            resolve(!!lock);
-            if (lock) {
-              return new Promise((release) => {
-                this._releaseLock = release;
-              });
-            }
-          })
-          .catch(() => resolve(false));
-      });
-      if (!acquired) throw new Error("wasm core is already open in another tab");
-    }
+    const acquired = await acquireWasmLock(
+      navigator.locks?.request?.bind(navigator.locks),
+      (release) => { this._releaseLock = release; },
+    );
+    if (!acquired) throw new Error("wasm core is already open in another tab");
     return new Promise((resolve, reject) => {
       const w = new Worker(this._workerUrl, { type: "module" });
+      const flush = () => w.postMessage({ type: "checkpoint" });
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") flush();
+      });
+      window.addEventListener("pagehide", flush);
       w.onmessage = (e) => {
         const d = e.data;
         if (d.type === "line") this._receiver?.(d.line);

@@ -749,7 +749,7 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
   drawer.id = "drawer";
   drawer.innerHTML = `
     <div class="drawer-head">
-      <velta-avatar data-act="profile" style="cursor:pointer" name="${escapeHtml(account.displayName)}" color="${escapeAttr(account.color || "#777")}" size="56" contact-id="1"${account.avatar ? ` avatar="${escapeAttr(fileUrl(account.avatar))}"` : ""}></velta-avatar>
+      <velta-avatar data-act="profile" style="cursor:pointer" name="${escapeHtml(account.displayName)}" color="${escapeAttr(account.color || "#777")}" size="56" contact-id="1" addr="${escapeAttr(account.addr || "")}"${account.avatar ? ` avatar="${escapeAttr(fileUrl(account.avatar))}"` : ""}></velta-avatar>
       <div>
         <div class="drawer-name">${escapeHtml(account.displayName)}</div>
         <div class="drawer-links">
@@ -764,7 +764,7 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
     <div class="drawer-items">
       <button type="button" class="ctx-item" data-act="saved"><svg viewBox="0 0 24 24"><path d="M6 3h12v18l-6-4.5L6 21z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg><span>Saved Messages</span></button>
       <button type="button" class="ctx-item" data-act="invite"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="13" y="13" width="8" height="8" rx="1" fill="none" stroke="currentColor" stroke-width="2"/><rect x="13" y="3" width="8" height="8" rx="1" fill="currentColor"/><rect x="3" y="13" width="8" height="8" rx="1" fill="currentColor"/></svg><span>Invite friends (QR)</span></button>
-      ${p2pAvailable ? `<label class="ctx-item"><svg viewBox="0 0 24 24"><path d="M2.5 9.5a14 14 0 0119 0M5.5 13a9.5 9.5 0 0113 0M8.5 16.5a5 5 0 017 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="19.5" r="1.4" fill="currentColor"/></svg><span>Local chat: ${p2pOn ? "on" : "off"}</span><input type="checkbox" role="switch" data-toggle="p2p"${p2pOn ? " checked" : ""}></label>` : ""}
+      ${p2pAvailable || p2pOn ? `<label class="ctx-item"><svg viewBox="0 0 24 24"><path d="M2.5 9.5a14 14 0 0119 0M5.5 13a9.5 9.5 0 0113 0M8.5 16.5a5 5 0 017 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="19.5" r="1.4" fill="currentColor"/></svg><span>Local chat: ${p2pOn ? "on" : "off"}</span><input type="checkbox" role="switch" data-toggle="p2p"${p2pOn ? " checked" : ""}></label>` : ""}
       ${p2pAvailable && p2pOn ? `<label class="ctx-item" title="Show when someone in a local chat is typing, and let them see when you are. Hints are live only and never stored."><svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="8" cy="12" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/><circle cx="16" cy="12" r="1.2" fill="currentColor"/></svg><span>Typing indicator: ${localStorage.getItem("velta-p2p-typing") !== "0" ? "on" : "off"}</span><input type="checkbox" role="switch" data-toggle="p2p-typing"${localStorage.getItem("velta-p2p-typing") !== "0" ? " checked" : ""}></label>` : ""}
       <div class="drawer-sec">Settings</div>
       <details class="drawer-details">

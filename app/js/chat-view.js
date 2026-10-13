@@ -90,6 +90,42 @@ function errToast(text, ms = 3000) {
   toast(text, ms, { danger: true });
 }
 
+function attachmentName(msg) {
+  const raw = msg.fileName || String(msg.filePath || "").replace(/\\/g, "/").split("/").pop() || "file";
+  return raw.replace(/[\\/:*?"<>|]/g, "_").replace(/^\.+/, "") || "file";
+}
+
+function asBytes(raw) {
+  if (raw instanceof Uint8Array) return raw;
+  if (raw == null) throw new Error("This attachment is empty");
+  return new Uint8Array(raw);
+}
+
+// Tauri reads the account file. The wasm core reads its memfs. Anything else
+// (a local-chat preview asset) is fetched from the URL the bubble uses.
+async function attachmentBytes(core, path) {
+  const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+  if (invoke) return asBytes(await invoke("read_media_bytes", { src: path }));
+  if (core?.transport?.readCoreFile) {
+    const raw = await core.transport.readCoreFile(path);
+    if (raw) return asBytes(raw);
+  }
+  const res = await fetch(fileUrl(path) || path);
+  if (!res.ok) throw new Error("Couldn't read the file");
+  return new Uint8Array(await res.arrayBuffer());
+}
+
+function triggerBrowserDownload(bytes, name) {
+  const url = URL.createObjectURL(new Blob([bytes]));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 // Image extensions the lightbox can show when native opening is unavailable
 // (Android) — animated webp included, the <img> element animates it.
 export function isMediaFilePath(path) {
@@ -2360,6 +2396,15 @@ export class ChatView {
         },
       });
     }
+    // Image, video, and file bubbles. Stickers keep Save sticker. A file that
+    // is still on the server (downloadState not Done) is fetched first.
+    if ((m.viewtype === "image" || m.viewtype === "video" || m.viewtype === "file")
+      && (m.filePath || (m.downloadState && m.downloadState !== "Done"))) {
+      items.push({
+        label: "Download", short: "Download", pair: "file", icon: ICO.download,
+        onClick: () => this._saveAttachment(m.id),
+      });
+    }
     // Local P2P groups: no pin / forward / save / react / delete (relay-core
     // features the mesh engine has no equivalent for).
     const p2pg = !!this.chat?.isP2pGroup;
@@ -3028,13 +3073,31 @@ export class ChatView {
     crop.hidden = pm.kind !== "image";
   }
 
+  // Tauri copies into the accounts dir. The wasm core reads the same memfs
+  // writeCoreFile uses for identity restore, so a picked Blob can be sent.
+  async _writeBlobForSend(filename, bytes) {
+    const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+    if (invoke) {
+      const filePath = await invoke("resolve_upload_path", { filename });
+      if (!filePath) throw new Error("resolve_upload_path returned empty");
+      await invoke("plugin:fs|write_file", bytes, {
+        headers: { path: encodeURIComponent(filePath) },
+      });
+      return filePath;
+    }
+    const write = this.core?.transport?.writeCoreFile;
+    if (typeof write !== "function") throw new Error("Sending that file needs the Velta app");
+    const safe = String(filename).replace(/[\\/]/g, "_");
+    const path = `/uploads/${safe}`;
+    await write.call(this.core.transport, path, bytes);
+    return path;
+  }
+
   // Send the pending attachment with the composer text as its caption.
   async _sendPendingMedia(session) {
     const pm = this.pendingMedia;
     const input = document.getElementById("composer-input");
     const text = input.value.trim();
-    const tauri = window.__TAURI__;
-    const invoke = tauri?.core?.invoke || tauri?.invoke;
     this._clearPendingMedia();
     input.value = ""; sizeComposer(input);
     try {
@@ -3045,7 +3108,7 @@ export class ChatView {
       // bytes/path on any skip or failure; a transcoded blob has no core path,
       // so it takes the write-to-uploads branch below.
       let sendBlob = pm.blob;
-      if (pm.kind === "image" && pm.blob && invoke && compressEnabled()) {
+      if (pm.kind === "image" && pm.blob && compressEnabled()) {
         const r = await compressImage(pm.blob, {
           name: pm.name, quality: mediaQualitySetting(),
         });
@@ -3057,17 +3120,16 @@ export class ChatView {
       if (filePath) {
         filename = filePath.replace(/\\/g, "/").split("/").pop();
       } else {
+        if (!sendBlob) throw new Error("Nothing to send");
         const t = sendBlob.type;
-        const ext = t === "image/jpeg" ? "jpg" : t === "image/webp" ? "webp" : t === "image/gif" ? "gif" : t?.startsWith("video/") ? "mp4" : "png";
-        filename = sendBlob !== pm.blob ? `${pm.kind}-${Date.now()}.webp` : `${pm.kind}-${Date.now()}.${ext}`;
-        filePath = await invoke("resolve_upload_path", { filename });
-        diagnosticsSink.append("info", `media: upload path = ${filePath}`);
-        if (!filePath) throw new Error("resolve_upload_path returned empty");
+        const fromName = String(pm.name || "").split(".").pop();
+        const ext = t === "image/jpeg" ? "jpg" : t === "image/webp" ? "webp" : t === "image/gif" ? "gif" : t?.startsWith("video/") ? "mp4" : (fromName || "png");
+        const safeExt = String(ext).toLowerCase().replace(/[^a-z0-9]/g, "") || "bin";
+        const stored = sendBlob !== pm.blob ? `${pm.kind}-${Date.now()}.webp` : `${pm.kind}-${Date.now()}.${safeExt}`;
+        filename = pm.name || stored;
         const bytes = new Uint8Array(await sendBlob.arrayBuffer());
-        await invoke("plugin:fs|write_file", bytes, {
-          headers: { path: encodeURIComponent(filePath) },
-        });
-        diagnosticsSink.append("info", `media: wrote ${bytes.length} bytes`);
+        filePath = await this._writeBlobForSend(stored, bytes);
+        diagnosticsSink.append("info", `media: wrote ${bytes.length} bytes to ${filePath}`);
       }
       const msg = await this._sendArchivedAware(session.chatId, { text: prefix + text, viewtype: pm.kind, file: filePath, filename, quoteId, quoteText });
       if (!this._isCurrent(session)) return;
@@ -3150,20 +3212,13 @@ export class ChatView {
   // Bake the composer card to WebP (JPEG if the webview won't) and send it.
   // Returns the sent message, or null so the caller can send plain text.
   async _sendPreviewImage(session, text, baked, quoteId, quoteText) {
-    const tauri = window.__TAURI__;
-    const invoke = tauri?.core?.invoke || tauri?.invoke;
-    if (!invoke) return null;
     try {
       const blob = await renderPreviewImage(baked.preview, baked.url);
       if (!blob) return null;
       const ext = blob.type === "image/webp" ? "webp" : "jpg";
       const filename = `lp-${Date.now()}.${ext}`;
-      const filePath = await invoke("resolve_upload_path", { filename });
-      if (!filePath) return null;
       const bytes = new Uint8Array(await blob.arrayBuffer());
-      await invoke("plugin:fs|write_file", bytes, {
-        headers: { path: encodeURIComponent(filePath) },
-      });
+      const filePath = await this._writeBlobForSend(filename, bytes);
       return await this._sendArchivedAware(session.chatId, {
         text, viewtype: "image", file: filePath, filename, quoteId, quoteText,
       });
@@ -3308,16 +3363,9 @@ export class ChatView {
 
   async _sendVoiceFile(session, blob, ext) {
     try {
-      const tauri = window.__TAURI__;
-      const invoke = tauri?.core?.invoke || tauri?.invoke;
-      if (!invoke) throw new Error("Voice messages need the app");
       const filename = `voice-${Date.now()}.${ext || "webm"}`;
-      const filePath = await invoke("resolve_upload_path", { filename });
-      if (!filePath) throw new Error("resolve_upload_path returned empty");
       const bytes = new Uint8Array(await blob.arrayBuffer());
-      await invoke("plugin:fs|write_file", bytes, {
-        headers: { path: encodeURIComponent(filePath) },
-      });
+      const filePath = await this._writeBlobForSend(filename, bytes);
       if (!this._isCurrent(session)) return;
       const { quoteId, quoteText, prefix } = this._takeQuote();
       const msg = await this._sendArchivedAware(session.chatId, {
@@ -3382,6 +3430,34 @@ export class ChatView {
     if (sent) this.onChatsChanged();
   }
 
+  // #120 on the PWA: gallery files are Blobs, not core paths. One image still
+  // stops in the composer; several each go out as their own message.
+  async _sendLocalImages(session, files) {
+    try {
+      let quote = null;
+      let sent = 0;
+      for (const file of files) {
+        if (!this._isCurrent(session)) return;
+        const name = file.name || `image-${Date.now()}.png`;
+        const ext = String(name.split(".").pop() || "png").toLowerCase().replace(/[^a-z0-9]/g, "") || "png";
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const path = await this._writeBlobForSend(`image-${Date.now()}-${sent}.${ext}`, bytes);
+        if (!quote) quote = this._takeQuote();
+        const q = sent === 0 ? quote : { quoteId: null, quoteText: null, prefix: "" };
+        const msg = await this._sendArchivedAware(session.chatId, {
+          text: q.prefix, viewtype: "image", file: path, filename: name,
+          quoteId: q.quoteId, quoteText: q.quoteText,
+        });
+        if (!this._isCurrent(session)) return;
+        this.appendOutgoing(msg);
+        sent++;
+      }
+      if (sent) this.onChatsChanged();
+    } catch (err) {
+      if (this._isCurrent(session)) errToast("Could not send image: " + (err?.message || err));
+    }
+  }
+
   async _sendAttachment(kind) {
     const session = this._session;
     if (!this._isCurrent(session) || !this.chat) return;
@@ -3400,16 +3476,15 @@ export class ChatView {
     const tauri = window.__TAURI__;
     const invoke = tauri?.core?.invoke || tauri?.invoke;
     if (!invoke) {
-      if (kind === "file") { errToast("Sending that file needs the Velta app"); return; }
       const file = await this._pickLocalFile(kind);
       if (!file || (Array.isArray(file) && !file.length) || !this._isCurrent(session)) return;
       if (Array.isArray(file)) {
         if (file.length === 1) this._setPendingMedia("image", file[0], null, file[0].name);
-        else errToast("Sending that file needs the Velta app");
+        else await this._sendLocalImages(session, file);
         return;
       }
       const mediaKind = kind === "camera" ? "image" : kind;
-      if (mediaKind === "image" || mediaKind === "video") this._setPendingMedia(mediaKind, file, null, file.name);
+      if (mediaKind === "image" || mediaKind === "video" || mediaKind === "file") this._setPendingMedia(mediaKind, file, null, file.name);
       return;
     }
 
@@ -3554,6 +3629,49 @@ export class ChatView {
     }
     this.onChatsChanged();
     return "sent";
+  }
+
+  // ponytail: desktop and PWA buffer the file in the page (read_media_bytes
+  // stops at 128MB). Android copies the file to the save-dialog location.
+  // Stream on desktop if that cap bites.
+  async _saveAttachment(msgId) {
+    const session = this._session;
+    if (!this._isCurrent(session)) return;
+    let msg = this.msgIndex.get(msgId)?.msg;
+    if (!msg) return;
+    try {
+      if (msg.downloadState && msg.downloadState !== "Done") {
+        if (msg.downloadState === "InProgress") { toast("Still downloading…"); return; }
+        await this.core.downloadFullMessage(msgId);
+        if (!this._isCurrent(session)) return;
+        const fresh = await this.core.getMessage(msgId);
+        if (!this._isCurrent(session)) return;
+        if (fresh) {
+          msg = fresh;
+          this.onMsgUpdated(session.chatId, fresh);
+        }
+      }
+      if (!msg.filePath) throw new Error("This attachment isn't available yet");
+      const name = attachmentName(msg);
+      const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+      if (/Android/.test(navigator.userAgent || "") && invoke) {
+        const picked = await invoke("plugin:dialog|save", { options: { title: "Save file", defaultPath: name } });
+        const uri = typeof picked === "string" ? picked : "";
+        if (!uri) return;
+        await invoke("save_attachment", { src: msg.filePath, uri });
+        if (this._isCurrent(session)) toast("Saved");
+        return;
+      }
+      const bytes = await attachmentBytes(this.core, msg.filePath);
+      if (!this._isCurrent(session)) return;
+      triggerBrowserDownload(bytes, name);
+      toast("Saved");
+    } catch (err) {
+      if (!this._isCurrent(session)) return;
+      const text = String(err?.message || err || "");
+      if (/cancel/i.test(text)) return;
+      errToast("Couldn't save: " + text);
+    }
   }
 
   async _downloadMedia(msgId) {

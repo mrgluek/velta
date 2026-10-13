@@ -11,7 +11,8 @@ Last updated for core `2.63.0` (see `core/Cargo.toml` `version` and the
 statement in `README.md`; feature-by-feature notes per release live in
 `CORE-CAPABILITIES.MD`). 2.63.0 notes: legacy `addr`/`mail_pw` configs are
 gone (identity backup + invite-claim now configure via `add_transport`;
-EnteredLoginParam needs the full serde shape), the animated-WebP vendored
+the JSON-RPC `EnteredLoginParam` is flat camelCase with a required
+top-level `password`, not the nested imap/smtp struct), the animated-WebP vendored
 patch #7 is retired (upstream #8777 = 81140d51). The 2.63.0 re-vendor
 (2aac743) silently lost two hand edits that were never quilt ops (#12,
 #13) — restored 2026-10-10; the quilt is now 21 ops and CI enforces it.
