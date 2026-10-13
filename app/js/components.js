@@ -3,7 +3,7 @@ import { Elena, html, unsafeHTML } from "../vendor/elena.js";
 import { formatListTime, timeAgo, timeTag } from "./format.js";
 import { fileUrl, mediaFallbackUrl } from "./media.js";
 import { diagnosticsSink } from "./diagnostics.js";
-import { avatarBackgroundUrl, fingerprintFor, cachedFingerprint, fingerprintGroups } from "./avatar.js";
+import { avatarBackgroundUrl, fingerprintFor, cachedFingerprint, cachedFingerprintIsDerived, fingerprintGroups } from "./avatar.js";
 
 const AVATAR_SVG = `<svg viewBox="0 0 24 24" style="width:55%;height:55%"><path d="M12 4l2.2 4.7 5 .6-3.7 3.4 1 4.9-4.5-2.6-4.5 2.6 1-4.9L4.8 9.3l5-.6z" fill="currentColor"/></svg>`;
 const DEVICE_SVG = `<svg viewBox="0 0 24 24" style="width:55%;height:55%"><rect x="5" y="3" width="14" height="18" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="17.5" r="1.2" fill="currentColor"/></svg>`;
@@ -101,7 +101,7 @@ class VeltaAvatar extends Elena(HTMLElement) {
         // resolves). Grid rides as a CSS background: no SVG child nodes.
         // Single-quoted url(): the encoded SVG contains no raw quotes.
         const groups = fingerprintGroups(cachedFingerprint(Number(this["contact-id"])));
-        const bg = groups ? avatarBackgroundUrl({ groups, badge: false }) : "";
+        const bg = groups ? avatarBackgroundUrl({ groups, badge: false, mono: cachedFingerprintIsDerived(Number(this["contact-id"])) }) : "";
         return html`<div class="${cls}" style="${style}${bg ? `background-image:url('${bg}');background-size:100% 100%;` : ""}" aria-hidden="true"><span class="velta-avatar-photo"><img class="velta-avatar-img" src="${this.avatar}" alt="" loading="lazy"></span></div>`;
       }
       return html`<div class="${cls}" style="${style}" aria-hidden="true">${this.initials()}<img class="velta-avatar-img" src="${this.avatar}" alt="" loading="lazy"></div>`;
@@ -111,7 +111,7 @@ class VeltaAvatar extends Elena(HTMLElement) {
     // as a CSS background (no child nodes — see avatarBackgroundUrl).
     if (!special && this.kind === "single") {
       const groups = fingerprintGroups(cachedFingerprint(Number(this["contact-id"])));
-      const bg = groups ? avatarBackgroundUrl({ groups, badge: true }) : "";
+      const bg = groups ? avatarBackgroundUrl({ groups, badge: true, mono: cachedFingerprintIsDerived(Number(this["contact-id"])) }) : "";
       if (bg) return html`<div class="${cls}" style="${style}background-image:url('${bg}');background-size:100% 100%;" aria-hidden="true"></div>`;
     }
     const inner = this.kind === "saved" ? unsafeHTML(AVATAR_SVG)

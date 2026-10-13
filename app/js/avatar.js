@@ -179,9 +179,17 @@ const GLYPH_LIGHT = "#f4f4f4"; // soft white — never pure
 // template-content clones instead of strings.
 const svgCache = new Map(); // cacheKey → svg string
 
-export function buildAvatarSvg({ groups, size = 120, radius = 26, withCaptions = false, badge = true }) {
+// Grey of the same lightness: the tile keeps its pattern but carries no
+// identity colors (no key behind it yet).
+export function monoFill([r, g, b]) {
+  const y = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
+  const h = y.toString(16).padStart(2, "0");
+  return `#${h}${h}${h}`;
+}
+
+export function buildAvatarSvg({ groups, size = 120, radius = 26, withCaptions = false, badge = true, mono = false }) {
   if (!groups || groups.length !== 10) return "";
-  const cacheKey = groups.join("") + `|${withCaptions ? 1 : 0}|${badge ? 1 : 0}|${radius}|${size}`;
+  const cacheKey = groups.join("") + `|${withCaptions ? 1 : 0}|${badge ? 1 : 0}|${radius}|${size}|${mono ? "m" : "c"}`;
   const cached = svgCache.get(cacheKey);
   if (cached) return cached;
   const chosen = {};
@@ -193,8 +201,9 @@ export function buildAvatarSvg({ groups, size = 120, radius = 26, withCaptions =
     return { x: (i - 7) * 40, y: 90, w: 40, h: 30, name, rgb };
   });
   const rects = cells.map((c) =>
-    `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" fill="${c.name}"/>`).join("");
-  const captions = !withCaptions ? "" : cells.map((c) => {
+    `<rect x="${c.x}" y="${c.y}" width="${c.w}" height="${c.h}" fill="${mono ? monoFill(c.rgb) : c.name}"/>`).join("");
+  // Color names only describe a real key's colors.
+  const captions = (!withCaptions || mono) ? "" : cells.map((c) => {
     const base = c.w >= 40 ? 9 : 8;
     const fs = Math.min(base, (c.w - 4) / (c.name.length * 0.72)).toFixed(1);
     return `<text x="${c.x + c.w / 2}" y="${c.y + c.h / 2}" text-anchor="middle" dominant-baseline="central" font-family="system-ui,-apple-system,sans-serif" font-weight="700" font-size="${fs}" fill="${contrastTextFor(c.rgb)}">${c.name}</text>`;
@@ -221,12 +230,12 @@ let clipSeq = 0;
 // Only the node-less grid/badge variants (no captions, no clipPath id).
 const bgCache = new Map(); // fingerprint+variant → data URL
 
-export function avatarBackgroundUrl({ groups, badge = true }) {
+export function avatarBackgroundUrl({ groups, badge = true, mono = false }) {
   if (!groups || groups.length !== 10) return "";
-  const key = groups.join("") + (badge ? "|b" : "|g");
+  const key = groups.join("") + (badge ? "|b" : "|g") + (mono ? "|m" : "");
   let url = bgCache.get(key);
   if (!url) {
-    const svg = buildAvatarSvg({ groups, size: 120, radius: 0, badge });
+    const svg = buildAvatarSvg({ groups, size: 120, radius: 0, badge, mono });
     if (!svg) return "";
     url = "data:image/svg+xml," + encodeURIComponent(svg);
     bgCache.set(key, url);
@@ -251,11 +260,22 @@ export function setFingerprintSource(fn, accountId = null, extras = null) {
   fingerprintSource = fn;
   fingerprintAccountId = accountId;
   addrOf = typeof extras?.addrOf === "function" ? extras.addrOf : null;
+  // Greyscale stand-ins are not final: the profile may have been configured
+  // or the contact's key may have arrived since. Ask again.
+  for (const [k, p] of fprCache) if (p.derived) fprCache.delete(k);
 }
 
 export function cachedFingerprint(contactId) {
   const p = fprCache.get(`${fingerprintAccountId}:${contactId}`);
   return p ? p.value ?? null : null; // .value set once resolved (see below)
+}
+
+// True when the cached tile for this contact is NOT backed by a real key:
+// a contact we have no key for yet, or our own profile before it has an
+// address (not configured). Those tiles render in greyscale.
+export function cachedFingerprintIsDerived(contactId) {
+  const p = fprCache.get(`${fingerprintAccountId}:${contactId}`);
+  return !!(p && p.derived);
 }
 
 export function fingerprintFor(contactId, addr) {
@@ -271,6 +291,10 @@ export function fingerprintFor(contactId, addr) {
   const p = Promise.all([infoP, whoP]).then(([encrInfo, who]) => {
     const parsed = parseFingerprint(encrInfo, who);
     if (parsed) return parsed;
+    // Self has a key once configured, but its encryption info throws; the
+    // address tile stands in for it. Anyone else without a parsed key, and
+    // self without an address, gets a greyscale tile.
+    p.derived = !(contactId === 1 && who);
     return deriveFingerprint(who || "id:" + contactId);
   });
   fprCache.set(key, p);

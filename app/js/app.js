@@ -2715,12 +2715,14 @@ async function showChatInfo(chat) {
     fingerprintFor(chat.contactId, chat.contact && chat.contact.addr)
       .then((fpr) => {
         const groups = fingerprintGroups(fpr);
+        const mono = cachedFingerprintIsDerived(chat.contactId);
         const slot = body.querySelector("[data-profile-key]");
-        if (slot) slot.textContent = fpr ? formatFingerprint(fpr) : "—";
+        // A derived tile is not a key; do not show it as one.
+        if (slot) slot.textContent = fpr && !mono ? formatFingerprint(fpr) : "—";
         const capSlot = body.querySelector("[data-caption-tile]");
         if (capSlot && groups) {
           // radius 0 — the svg element's own border-radius does the rounding.
-          capSlot.innerHTML = buildAvatarSvg({ groups, withCaptions: true, size: 168, radius: 0 });
+          capSlot.innerHTML = buildAvatarSvg({ groups, withCaptions: true, size: 168, radius: 0, mono });
         } else if (capSlot) {
           capSlot.remove();
         }
