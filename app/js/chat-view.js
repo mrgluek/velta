@@ -1,5 +1,5 @@
 // chat-view.js — virtualized message history (virtual-scroller) + composer
-import { formatTime, formatDay, formatDateTime, formatServerUrl, messageInfoState, formatBytes, timeTag, stampTime } from "./format.js";
+import { formatTime, formatDay, formatDateTime, formatServerUrl, messageInfoState, messageInfoReactions, formatBytes, timeTag, stampTime } from "./format.js";
 import { escapeHtml, escapeAttr, ticksSvg, setVideoLightboxOpener } from "./components.js";
 import { showContextMenu, showMessageSheet, showModal, showStickerPicker, closeAllPopups, confirmDeleteMessagesModal, confirmModal, toast, openImageLightbox, openVideoLightbox, CLOSE_SVG } from "./ui.js";
 import { diagnosticRow } from "./diagnostics.js";
@@ -2457,11 +2457,27 @@ export class ChatView {
       <div class="info-row"><span class="k">Sent</span><span class="v">${escapeHtml(formatDateTime(m.sentTs || m.ts))}</span></div>
       <div class="info-row"><span class="k">Received</span><span class="v">${escapeHtml(m.receivedTs ? formatDateTime(m.receivedTs) : "—")}</span></div>
       <div class="info-row"><span class="k">State</span><span class="v">${escapeHtml(state)}</span></div>
+      <div class="info-reacts" data-reacts hidden></div>
       ${deliveryRows}
       <div class="info-row"><span class="k">Database ID</span><span class="v">#${escapeHtml(m.id)}</span></div>
       <div class="info-row wrap"><span class="k">Message-ID</span><span class="v" data-mid>…</span></div>
       <div class="info-row wrap"><span class="k">Server URL</span><span class="v" data-servers>…</span></div>`,
     });
+    const reactBox = info.modal.querySelector("[data-reacts]");
+    const paintReactions = (payload) => {
+      if (!reactBox || !info.modal.isConnected) return;
+      const html = messageInfoReactions(payload);
+      reactBox.hidden = !html;
+      reactBox.innerHTML = html;
+      reactBox.querySelectorAll("[data-react]").forEach(chip => chip.addEventListener("click", () => {
+        if (this.chat) this.core.addReaction(this.chat.id, m.id, chip.dataset.react);
+      }));
+    };
+    const fromMsg = m.reactions?.length
+      ? { reactions: m.reactions.map(r => ({ emoji: r.emoji, count: r.count, isFromSelf: !!r.mine })), reactionsByContact: {} }
+      : null;
+    if (grp || this.chat?.isP2p || !this.core.getMessageReactions) paintReactions(fromMsg);
+    else this.core.getMessageReactions(m.id).then(paintReactions).catch(() => paintReactions(fromMsg));
     info.modal.querySelectorAll("[data-retry-member]").forEach(btn => btn.addEventListener("click", () => {
       btn.disabled = true;
       btn.textContent = "Retrying…";

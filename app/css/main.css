@@ -1063,6 +1063,7 @@ velta-video { display: block; height: 100%; }
   border-radius: 12px; padding: 2px 8px; font-size: 13px;
   cursor: pointer; user-select: none;
 }
+button.reaction-chip { font: inherit; color: inherit; }
 .reaction-chip.mine { border-color: var(--accent); background: rgba(90,162,230,.18); }
 
 .msg-checkbox {
@@ -1623,6 +1624,9 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
 .modal details.backup-export, .modal details.backup-restore { margin: 8px 0; }
 .modal details.backup-export summary, .modal details.backup-restore summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
 
+.info-reacts { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; }
+.info-react > summary { cursor: pointer; }
+.info-react-who { padding: 2px 4px 2px 12px; font-size: 14px; }
 .info-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 14.5px; }
 .info-row:last-child { border-bottom: 0; }
 .info-row .k { color: var(--text-dim); }

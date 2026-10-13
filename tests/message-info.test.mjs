@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { formatDateTime, formatServerUrl, messageInfoState, timeParts } from "../app/js/format.js";
+import { formatDateTime, formatServerUrl, messageInfoState, messageInfoReactions, timeParts } from "../app/js/format.js";
 import { JsonRpcCore } from "../app/js/rpc-core.js";
 
 const read = (p) => readFileSync(new URL("../" + p, import.meta.url), "utf8");
@@ -30,6 +30,50 @@ test("server URLs drop the INBOX wrapper and keep a real folder", () => {
     "a@relay.example.org INBOX/DeltaChat UID=9",
   );
   assert.equal(formatServerUrl("not-a-url"), "not-a-url");
+});
+
+test("message info lists each reaction and who sent it", () => {
+  assert.equal(messageInfoReactions(null), "");
+  assert.equal(messageInfoReactions({ reactions: [] }), "");
+  const html = messageInfoReactions({
+    reactions: [
+      { emoji: "👍", count: 2, isFromSelf: true },
+      { emoji: "🔥", count: 1, isFromSelf: false },
+    ],
+    reactionsByContact: { "1": ["👍"], "4": ["👍"], "9": ["🔥"] },
+    names: { "4": "Ann <a>", "9": "Bo" },
+  });
+  assert.match(html, /<details open class="info-react">/);
+  assert.match(html, /<button type="button" class="reaction-chip mine" data-react="👍">👍 2<\/button>/);
+  assert.match(html, /<button type="button" class="reaction-chip" data-react="🔥">🔥 1<\/button>/);
+  assert.match(html, /info-react-who">You</);
+  assert.match(html, /info-react-who">Ann &lt;a&gt;</);
+  assert.match(html, /info-react-who">Bo</);
+  assert.match(read("app/js/chat-view.js"), /getMessageReactions/);
+  assert.match(read("app/js/rpc-core.js"), /get_message_reactions/);
+});
+
+test("getMessageReactions resolves contact names", async () => {
+  const core = new JsonRpcCore();
+  core.accountId = 3;
+  const calls = [];
+  core._call = async (method, ...args) => {
+    calls.push([method, args]);
+    if (method === "get_message_reactions") {
+      return {
+        reactions: [{ emoji: "👍", count: 2, isFromSelf: true }],
+        reactionsByContact: { 1: ["👍"], 4: ["👍"] },
+      };
+    }
+    if (method === "get_contacts_by_ids") return { 4: { id: 4, displayName: "Ann" } };
+    throw new Error(method);
+  };
+  const out = await core.getMessageReactions(9);
+  assert.deepEqual(calls.map(c => c[0]), ["get_message_reactions", "get_contacts_by_ids"]);
+  assert.deepEqual(calls[1][1], [3, [4]]);
+  assert.equal(out.names["4"], "Ann");
+  core._call = async () => null;
+  assert.equal(await core.getMessageReactions(9), null);
 });
 
 test("message info state is Seen plus Encrypted", () => {

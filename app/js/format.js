@@ -60,6 +60,39 @@ export function messageInfoState(m) {
   return `${seen ? "Seen" : "Not seen"}, ${enc}`;
 }
 
+function escInfo(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+// Message-info reactions (#122). One open <details> per emoji: the summary is
+// a chip (button, so the tap reacts and does not toggle the details), the
+// body is who sent it. payload is get_message_reactions plus names[id].
+// Contact 1 with no name is "You".
+export function messageInfoReactions(payload) {
+  const list = payload?.reactions;
+  if (!Array.isArray(list) || !list.length) return "";
+  const by = payload.reactionsByContact || {};
+  const names = payload.names || {};
+  const who = new Map();
+  for (const [id, emojis] of Object.entries(by)) {
+    const name = names[id] || (String(id) === "1" ? "You" : "Contact");
+    for (const emoji of emojis || []) {
+      if (!who.has(emoji)) who.set(emoji, []);
+      who.get(emoji).push(name);
+    }
+  }
+  return list.map((r) => {
+    const emoji = r.emoji || "";
+    const people = who.get(emoji) || [];
+    const mine = !!(r.isFromSelf || r.mine);
+    const count = Number(r.count) || people.length || 0;
+    const body = people.map((n) => `<div class="info-react-who">${escInfo(n)}</div>`).join("");
+    return `<details open class="info-react"><summary><button type="button" class="reaction-chip${mine ? " mine" : ""}" data-react="${escInfo(emoji)}">${escInfo(emoji)} ${count}</button></summary>${body}</details>`;
+  }).join("");
+}
+
 // Core server URL "<addr/folder/;UID=n>" → "addr UID=n" (folder kept when it is not INBOX).
 export function formatServerUrl(raw) {
   const s = String(raw ?? "");

@@ -1664,6 +1664,24 @@ export class JsonRpcCore extends EventTarget {
     this._emitAccount("chat-updated", { chatId: toChatId }, accountEpoch);
   }
 
+  // get_message_reactions plus display names for message info (#122).
+  // Self (contact 1) is named by the caller. Returns null when nobody reacted.
+  async getMessageReactions(msgId) {
+    const raw = await this._call("get_message_reactions", this.accountId, msgId);
+    if (!raw?.reactions?.length) return null;
+    const by = raw.reactionsByContact || {};
+    const ids = Object.keys(by).map(Number).filter(id => id > 1);
+    const names = {};
+    if (ids.length) {
+      const contacts = await this._call("get_contacts_by_ids", this.accountId, ids).catch(() => ({}));
+      for (const id of ids) {
+        const c = contacts?.[id] ?? contacts?.[String(id)];
+        if (c) names[String(id)] = this._mapContact(c).name;
+      }
+    }
+    return { reactions: raw.reactions, reactionsByContact: by, names };
+  }
+
   async addReaction(chatId, msgId, emoji) {
     const { accountId, accountEpoch } = this;
     await this._call("send_reaction", accountId, msgId, [emoji]);
