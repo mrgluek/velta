@@ -3336,14 +3336,49 @@ export class ChatView {
     input.type = "file";
     if (kind === "image" || kind === "camera") input.accept = "image/*";
     else if (kind === "video") input.accept = "video/*";
+    if (kind === "image") input.multiple = true;
     if (kind === "camera") input.capture = "environment";
     return new Promise(resolve => {
       let done = false;
       const finish = (file) => { if (done) return; done = true; resolve(file || null); };
-      input.addEventListener("change", () => finish(input.files?.[0]));
+      input.addEventListener("change", () => {
+        const list = [...(input.files || [])];
+        finish(kind === "image" ? list : (list[0] || null));
+      });
       input.addEventListener("cancel", () => finish(null));
       input.click();
     });
+  }
+
+  // #120: two or more gallery images each go out as their own message.
+  // One image still stops in the composer strip so it can take a caption.
+  async _sendSeparateImages(session, paths) {
+    const invoke = window.__TAURI__?.core?.invoke || window.__TAURI__?.invoke;
+    let quote = null;
+    let sent = 0;
+    for (let i = 0; i < paths.length; i++) {
+      if (!this._isCurrent(session)) return;
+      const picked = paths[i];
+      let resolved;
+      if (/^content:\/\//.test(picked)) {
+        resolved = await invoke("resolve_content_uri", { uri: picked, filename: `${Date.now()}-${i}` });
+      } else {
+        await invoke("allow_picked_path", { path: picked }).catch(e => rustLog(`allow_picked_path: ${e}`));
+        resolved = await resolveAttachmentPath(picked, picked.replace(/\\/g, "/").split("/").pop());
+      }
+      if (!this._isCurrent(session) || !resolved) return;
+      if (!quote) quote = this._takeQuote();
+      const q = sent === 0 ? quote : { quoteId: null, quoteText: null, prefix: "" };
+      const name = String(resolved).replace(/\\/g, "/").split("/").pop() || "image";
+      const msg = await this._sendArchivedAware(session.chatId, {
+        text: q.prefix, viewtype: "image", file: resolved, filename: name,
+        quoteId: q.quoteId, quoteText: q.quoteText,
+      });
+      if (!this._isCurrent(session)) return;
+      this.appendOutgoing(msg);
+      sent++;
+    }
+    if (sent) this.onChatsChanged();
   }
 
   async _sendAttachment(kind) {
@@ -3366,16 +3401,26 @@ export class ChatView {
     if (!invoke) {
       if (kind === "file") { errToast("Sending that file needs the Velta app"); return; }
       const file = await this._pickLocalFile(kind);
-      if (!file || !this._isCurrent(session)) return;
+      if (!file || (Array.isArray(file) && !file.length) || !this._isCurrent(session)) return;
+      if (Array.isArray(file)) {
+        if (file.length === 1) this._setPendingMedia("image", file[0], null, file[0].name);
+        else errToast("Sending that file needs the Velta app");
+        return;
+      }
       const mediaKind = kind === "camera" ? "image" : kind;
       if (mediaKind === "image" || mediaKind === "video") this._setPendingMedia(mediaKind, file, null, file.name);
       return;
     }
 
     try {
-      let picked = await invoke("plugin:dialog|open", { options: { multiple: false, filters } });
+      let picked = await invoke("plugin:dialog|open", { options: { multiple: kind === "image", filters } });
       if (!this._isCurrent(session)) return;
-      if (Array.isArray(picked)) picked = picked[0];
+      const paths = (Array.isArray(picked) ? picked : picked ? [picked] : []).filter(Boolean);
+      if (kind === "image" && paths.length > 1) {
+        await this._sendSeparateImages(session, paths);
+        return;
+      }
+      picked = paths[0];
       if (!picked) return;
       // V-07/#65: fs reads are scope-gated — the user's pick itself is the
       // consent; add exactly that path to the fs runtime scope.

@@ -407,6 +407,41 @@ for (const stage of ["picker", "copy", "send"]) {
   });
 }
 
+test("several gallery images send as separate messages, one stays in the strip", async t => {
+  const { view, core } = setup(t);
+  await view.open(7);
+  view.replyTo = { id: 10, text: "hi" };
+  const sent = [];
+  core.sendMessage = (_id, data) => {
+    sent.push(data);
+    return message(100 + sent.length);
+  };
+  const dialogs = [];
+  window.__TAURI__ = { core: { invoke: async (command, args) => {
+    if (command === "js_log") return;
+    if (command === "plugin:dialog|open") {
+      dialogs.push(args.options.multiple);
+      return dialogs.length === 1 ? ["content://a", "content://b"] : ["content://one"];
+    }
+    if (command === "resolve_content_uri") return `/data/${args.filename}.jpg`;
+    if (command === "plugin:fs|read_file") return [1, 2, 3];
+    throw new Error(command);
+  } } };
+  await view._sendAttachment("image");
+  assert.deepEqual(dialogs, [true]);
+  assert.equal(view.pendingMedia, null);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[0].viewtype, "image");
+  assert.equal(sent[1].viewtype, "image");
+  assert.equal(sent[0].quoteId, 10);
+  assert.equal(sent[1].quoteId, null);
+  assert.notEqual(sent[0].file, sent[1].file);
+  await view._sendAttachment("image");
+  assert.deepEqual(dialogs, [true, true]);
+  assert.equal(view.pendingMedia?.corePath.startsWith("/data/"), true);
+  assert.equal(sent.length, 2);
+});
+
 for (const stage of ["download", "message"]) {
   test(`stale media ${stage} completion cannot fetch or update the new account`, async t => {
     const { view, core, switchTo } = setup(t);
