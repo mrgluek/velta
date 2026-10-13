@@ -2053,13 +2053,8 @@ export class ChatView {
           e.preventDefault();
           e.stopPropagation();
           openHttp(href);
-        } else if (/^velta:\/\/tunnel(?:[?#/]|$)/i.test(href)) {
-          // Setup link in a message: the app's deeplink router confirms first.
-          e.preventDefault();
-          e.stopPropagation();
-          document.dispatchEvent(new CustomEvent("velta-open-link", { detail: { url: href } }));
         }
-        return; // other hrefs: browser default, never row selection
+        return; // non-http hrefs: browser default, never row selection
       }
       const chip = e.target.closest("[data-react]");
       if (chip) { this.core.addReaction(this.chat.id, m.id, chip.dataset.react); return; }
