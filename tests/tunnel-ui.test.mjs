@@ -28,6 +28,7 @@ test("status lines", () => {
   assert.match(describeTunnel({ installed: true, available: true, running: true, mode: "always", route: "tunnel" }).detail, /Always/);
   assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "offline" }).headline, "No network");
   assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "direct" }).headline, "Direct");
+  assert.match(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "relays-down" }).detail, /down/);
 });
 
 test("report carries routing state and events only", () => {
@@ -38,6 +39,9 @@ test("report carries routing state and events only", () => {
     events: [{ t: "2026-10-11T10:00:00Z", msg: "route direct -> tunnel (blocked)" }],
   }, { app: "1.4.65", now: new Date("2026-10-11T10:05:00Z") });
   assert.match(text, /relays ok 0\/2 {2}canary ok: true/);
+  assert.doesNotMatch(text, /via tunnel/);
+  assert.match(tunnelReport({ last_result: { relays: 1, relay_ok: 0, canary_ok: true, tunnel_checked: true, tunnel_ok: false }, events: [] }),
+    /relays ok 0\/1 {2}canary ok: true {2}via tunnel ok: false/);
   assert.match(text, /tunnel: active 2, conns 5, fails 1, up 2 KB, down 4 KB/);
   assert.match(text, /route direct -> tunnel \(blocked\)/);
   assert.doesNotMatch(text, /pass|user/i);

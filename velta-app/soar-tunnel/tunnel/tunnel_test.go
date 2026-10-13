@@ -444,3 +444,82 @@ func TestTunnelFailuresMarkItUnhealthy(t *testing.T) {
 		t.Fatalf("count must reset on a route change: %d", fails)
 	}
 }
+
+func TestRelaysDownThroughTheTunnelKeepTheRoute(t *testing.T) {
+	down := probeResult{Relays: 1, CanaryOK: true, TunnelChecked: true}
+	r, f, _, s := decide(RouteDirect, down, blockedAfter-1, 0, true)
+	if r != RouteDirect || s != stateRelaysDown || f != blockedAfter {
+		t.Fatalf("relays failing through a live tunnel too are down, not blocked: %v %d %s", r, f, s)
+	}
+	up := probeResult{Relays: 1, CanaryOK: true, TunnelChecked: true, TunnelOK: true}
+	if r, _, _, _ := decide(RouteDirect, up, blockedAfter-1, 0, true); r != RouteTunnel {
+		t.Fatal("a relay answering through the tunnel means blocked: switch")
+	}
+}
+
+// relayDownTunnel is a test tunnel in auto mode one blocked probe away from
+// switching, with relay.example.org failing directly and a canary answering.
+func relayDownTunnel(t *testing.T, viaTunnel error, session bool) (*Tunnel, *atomic.Int32) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAuto, echoDialer("D:", &n), echoDialer("T:", &n))
+	tt.mu.Lock()
+	tt.relays["relay.example.org"] = time.Now()
+	tt.relayPorts["relay.example.org"] = "993"
+	tt.failStreak = blockedAfter - 1
+	tt.mu.Unlock()
+	tt.probeTLS = func(_ context.Context, hostport, _ string) error {
+		if hostport == DefaultCanaries[0] {
+			return nil
+		}
+		return errors.New("refused")
+	}
+	var tunnelProbes atomic.Int32
+	tt.probeTunnel = func(_ context.Context, hostport, _ string) error {
+		if hostport != "relay.example.org:993" {
+			t.Errorf("tunnel probe of %s", hostport)
+		}
+		tunnelProbes.Add(1)
+		return viaTunnel
+	}
+	tt.established = func() bool { return session }
+	return tt, &tunnelProbes
+}
+
+func TestSingleRelayDownStaysDirect(t *testing.T) {
+	tt, probes := relayDownTunnel(t, errors.New("connection refused"), true)
+	tt.applyProbe(tt.confirmViaTunnel(tt.probe()))
+	s := tt.Status(10)
+	if s.Route != "direct" || s.State != stateRelaysDown || probes.Load() != 1 {
+		t.Fatalf("a relay down through a live tunnel must not switch: route %s state %s probes %d", s.Route, s.State, probes.Load())
+	}
+	if !s.LastResult.TunnelChecked || s.LastResult.TunnelOK {
+		t.Fatalf("result must carry the tunnel check: %+v", s.LastResult)
+	}
+}
+
+func TestRelayReachableThroughTheTunnelSwitches(t *testing.T) {
+	tt, _ := relayDownTunnel(t, nil, true)
+	tt.applyProbe(tt.confirmViaTunnel(tt.probe()))
+	if s := tt.Status(0); s.Route != "tunnel" || s.State != "blocked" {
+		t.Fatalf("relay blocked directly but reachable through the tunnel: route %s state %s", s.Route, s.State)
+	}
+}
+
+func TestNoTunnelSessionSwitchesAnyway(t *testing.T) {
+	tt, _ := relayDownTunnel(t, errors.New("timeout"), false)
+	tt.applyProbe(tt.confirmViaTunnel(tt.probe()))
+	if s := tt.Status(0); s.Route != "tunnel" || s.LastResult.TunnelChecked {
+		t.Fatalf("a failure without a live session proves nothing: route %s %+v", s.Route, s.LastResult)
+	}
+}
+
+func TestTunnelCheckedOnlyBeforeASwitch(t *testing.T) {
+	tt, probes := relayDownTunnel(t, nil, true)
+	tt.mu.Lock()
+	tt.failStreak = 0
+	tt.mu.Unlock()
+	tt.applyProbe(tt.confirmViaTunnel(tt.probe()))
+	if probes.Load() != 0 {
+		t.Fatalf("the first blocked probe must not touch the tunnel (%d probes)", probes.Load())
+	}
+}
