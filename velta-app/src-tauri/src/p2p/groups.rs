@@ -553,6 +553,7 @@ mod tests {
     #[test]
     fn group_state_tampered_member_or_name_fails_verify() {
         let (_, _, st) = signed(3);
+        #[allow(clippy::type_complexity)]
         let tamper: Vec<(&str, Box<dyn Fn(&mut GroupState)>)> = vec![
             ("group name", Box::new(|s| s.name = "Hijacked".into())),
             ("member name", Box::new(|s| s.members[1].name = "Mallory".into())),
@@ -591,6 +592,7 @@ mod tests {
     fn group_state_validation_rejects_5_members_dupes_missing_creator_long_name() {
         let (_, _, ok) = signed(MAX_GROUP_MEMBERS);
         ok.validate().unwrap(); // exactly the cap is fine
+        #[allow(clippy::type_complexity)]
         let bad: Vec<(&str, Box<dyn Fn(&mut GroupState)>)> = vec![
             ("6 members", Box::new(|s| s.members.push(member(&key(), "Sixth")))),
             ("no members", Box::new(|s| s.members.clear())),

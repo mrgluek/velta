@@ -1161,7 +1161,7 @@ fn scoped_accounts_path(app: &tauri::AppHandle, path: &str) -> Result<PathBuf, S
         .path()
         .resolve(".", BaseDirectory::AppLocalData)
         .map_err(|e| e.to_string())?;
-    let base_canon = std::fs::canonicalize(&base).unwrap_or_else(|_| base);
+    let base_canon = std::fs::canonicalize(&base).unwrap_or(base);
     if !canon.starts_with(&base_canon) {
         return Err("path outside the app data directory".into());
     }
@@ -1341,6 +1341,7 @@ fn chat_link_token(app: tauri::AppHandle) -> Result<String, String> {
 // the config identifier, the same identity the notification plugin uses.
 #[cfg(target_os = "windows")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // tauri command: one arg per JS field
 fn notify_incoming(
     app: tauri::AppHandle,
     title: String,
@@ -1584,7 +1585,7 @@ fn notify_prefs_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 // reads the static loaded from the local-data copy.
 fn notify_prefs_files_dir_copy(app: &tauri::AppHandle, json: &str) {
     #[cfg(target_os = "android")]
-    if let Some(dir) = app.path().resolve("notify-prefs.json", tauri::path::BaseDirectory::AppData).ok() {
+    if let Ok(dir) = app.path().resolve("notify-prefs.json", tauri::path::BaseDirectory::AppData) {
         let _ = std::fs::write(dir, json);
     }
     #[cfg(not(target_os = "android"))]
@@ -1663,7 +1664,7 @@ fn get_battery_status() -> Result<String, String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -1705,7 +1706,7 @@ fn share_text(text: String, title: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2306,7 +2307,7 @@ fn open_in_app_browser(url: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2350,7 +2351,7 @@ fn open_webview_browser(url: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2448,7 +2449,7 @@ fn copy_path_to_content_uri(src: &std::path::Path, uri: &str) -> Result<(), Stri
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2462,7 +2463,7 @@ fn copy_path_to_content_uri(src: &std::path::Path, uri: &str) -> Result<(), Stri
         .l()
         .map_err(|e| e.to_string())?;
     let cr = env
-        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
+        .call_method(context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
         .map_err(|e| e.to_string())?
         .l()
         .map_err(|e| e.to_string())?;
@@ -2590,7 +2591,7 @@ fn resolve_content_uri_blocking(app: tauri::AppHandle, uri: String, filename: St
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2605,7 +2606,7 @@ fn resolve_content_uri_blocking(app: tauri::AppHandle, uri: String, filename: St
         .map_err(|e| e.to_string())?;
 
     let cr = env
-        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
+        .call_method(context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
         .map_err(|e| e.to_string())?
         .l()
         .map_err(|e| e.to_string())?;
@@ -2664,7 +2665,7 @@ fn resolve_content_uri_blocking(app: tauri::AppHandle, uri: String, filename: St
     };
     let dest = app
         .path()
-        .resolve(&format!("uploads/{}", base_name), BaseDirectory::AppLocalData)
+        .resolve(format!("uploads/{}", base_name), BaseDirectory::AppLocalData)
         .map_err(|e| e.to_string())?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -3038,12 +3039,7 @@ fn find_sidecar(app: &tauri::AppHandle) -> Option<PathBuf> {
         std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("..").join("resources").join(SIDECAR_NAME))).map(|p| p.canonicalize().unwrap_or(p)),
     ];
 
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    candidates.into_iter().flatten().find(|c| c.is_file())
 }
 
 fn accounts_dir(app: &tauri::AppHandle) -> PathBuf {
@@ -3480,7 +3476,7 @@ fn kotlin_notify_incoming(
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3526,7 +3522,7 @@ fn battery_is_exempt() -> Result<bool, String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3544,7 +3540,7 @@ fn battery_request_exemption() -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3564,7 +3560,7 @@ fn install_update_android(path: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3727,7 +3723,7 @@ pub fn run() {
                     rand::rngs::OsRng.fill_bytes(&mut bytes);
                     data_encoding::HEXLOWER.encode(&bytes)
                 };
-                start_media_server(accounts_dir(&app.handle()));
+                start_media_server(accounts_dir(app.handle()));
             }
 
             log("setup started");
@@ -4006,7 +4002,7 @@ mod media_tests {
 
     // Content: byte i = (i % 251) as u8, so any wrong offset or truncated
     // body produces a different payload.
-    fn make_media_file(dir: &PathBuf, name: &str, len: usize) -> PathBuf {
+    fn make_media_file(dir: &std::path::Path, name: &str, len: usize) -> PathBuf {
         let path = dir.join(name);
         let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
         std::fs::write(&path, &data).unwrap();
