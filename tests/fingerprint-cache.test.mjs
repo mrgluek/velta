@@ -3,7 +3,8 @@
 // a contact resolved once is never fetched again.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { setFingerprintSource, fingerprintFor, cachedFingerprint, parseFingerprint, deriveFingerprint } from "../app/js/avatar.js";
+import { createHash } from "node:crypto";
+import { setFingerprintSource, fingerprintFor, cachedFingerprint, parseFingerprint, deriveFingerprint, fingerprintFromVcard, fingerprintFromPublicKey } from "../app/js/avatar.js";
 
 const ALICE_KEY = "0123 4567 89AB CDEF 0123 4567 89AB CDEF 0123 4567";
 
@@ -56,4 +57,19 @@ test("a fingerprint tile ignores the display name and the address", () => {
   assert.equal(parseFingerprint(named, addr), BOB);
   assert.equal(parseFingerprint(raw, addr), BOB);
   assert.equal(parseFingerprint("No encryption.", addr), null);
+  const me = "AAAABBBBCCCCDDDDEEEEFFFF1111222233334444";
+  assert.equal(parseFingerprint(named, "me@mail.org"), me);
+});
+
+test("v4 public-key packet fingerprint matches RFC 4880", async () => {
+  // New-format tag 6, 6-byte body: version 4, timestamp 1, algo 1.
+  const body = Uint8Array.of(4, 0, 0, 0, 1, 1);
+  const pkt = Uint8Array.of(0xc6, body.length, ...body);
+  const material = Uint8Array.of(0x99, 0x00, body.length, ...body);
+  const expect = createHash("sha1").update(material).digest("hex").toUpperCase();
+  assert.equal(await fingerprintFromPublicKey(pkt), expect);
+  const b64 = Buffer.from(pkt).toString("base64");
+  const vcard = `BEGIN:VCARD\r\nVERSION:4.0\r\nEMAIL:me@x.org\r\nFN:Me\r\nKEY:data:application/pgp-keys;base64\\,${b64}\r\nEND:VCARD`;
+  assert.equal(await fingerprintFromVcard(vcard), expect);
+  assert.equal(await fingerprintFromVcard("BEGIN:VCARD\r\nFN:Me\r\nEND:VCARD"), null);
 });

@@ -5,11 +5,18 @@
 // defines window.webxdc inside the app.
 
 import { CLOSE_SVG, toast, confirmModal } from "./ui.js";
+import { LruCache } from "./lru.js";
 
 let core = null;
 let active = null; // { msgId, iframe, serial }
+// serials stays a plain Map: it is the delivered-serial watermark; evicting
+// one would restart delivery at 0 and re-post old updates to an app. It is
+// one number per opened/updated app, dropped on instance delete and cleared
+// on account switch.
 const serials = new Map(); // msgId -> last delivered serial
-const infoCache = new Map(); // msgId -> info object
+// Bounded (lru.js): 100 apps / 2 MB; a miss just re-asks the core.
+const infoCache = new LruCache({ maxItems: 100, maxBytes: 2 * 1024 * 1024,
+  sizeOf: (v) => JSON.stringify(v || {}).length * 2 }); // msgId -> info object
 
 // The iframe origin depends on the platform: Windows and Android serve
 // custom protocols at http://<scheme>.localhost, mac/linux at <scheme>://.
@@ -33,6 +40,7 @@ export function initWebxdc(coreInstance) {
   core.addEventListener("account-changing", () => {
     closeWebxdc();
     serials.clear();
+    infoCache.clear(); // msg ids are per-account
   });
 }
 

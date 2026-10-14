@@ -4,7 +4,7 @@ A cross-platform **Delta Chat** client built as a single PWA-ish web app wrapped
 
 ## Download
 
-**[Android](https://github.com/pbuzdin/velta/releases/download/v1.4.68/Velta-1.4.68-arm64.apk)** (~49 MB) · **[Windows](https://github.com/pbuzdin/velta/releases/download/v1.4.68/Velta_1.4.68_x64-setup.exe)** (~13 MB) · **[macOS](https://github.com/pbuzdin/velta/releases/download/v1.4.68/Velta_1.4.68_universal.dmg)** (~36 MB)
+**[Android](https://github.com/pbuzdin/velta/releases/download/v1.4.69/Velta-1.4.69-arm64.apk)** (~49 MB) · **[Windows](https://github.com/pbuzdin/velta/releases/download/v1.4.69/Velta_1.4.69_x64-setup.exe)** (~13 MB) · **[macOS](https://github.com/pbuzdin/velta/releases/download/v1.4.69/Velta_1.4.69_universal.dmg)** (~36 MB)
 
 Android needs an arm64 phone. Windows is the x64 installer. macOS is a universal test build that isn't notarized yet, so see [Install](#install) before the first launch. Other files and older versions are on the [releases page](https://github.com/pbuzdin/velta/releases).
 
@@ -15,7 +15,7 @@ Velta shares one web frontend (`app/`) between:
 - **Windows desktop** — a Tauri 2 app that bundles `deltachat-rpc-server.exe` as a sidecar.
 - **macOS desktop** (test build) — the same Tauri 2 app with `deltachat-rpc-server` bundled as an `externalBin` sidecar; universal (Apple Silicon + Intel), ad-hoc signed, not notarized yet — see [Install on macOS](#install).
 - **Android mobile** — the same Tauri 2 app, but the Delta Chat core runs in-process inside the APK. A foreground service keeps sync (and notifications) running after the app is backgrounded.
-- **Browser/PWA** (work in progress) — the same frontend can be served statically and connects to a local `velta-core-service` over loopback WebSocket/HTTP, or falls back to a mock core for demo purposes. The PWA's target deployment is a **remote core service over WSS/TLS** — the loopback bridge remains the local/dev path. If the loopback connection drops mid-session (service restart), the app reconnects automatically — backoff up to 15 s — and refreshes the chat list; no reload needed. A refresh of the wasm PWA keeps the signed-in account, its database included: the browser copy is written when login or an identity restore finishes, when the page goes to the background, and every few seconds, and a copy cut off by a reload is ignored in favour of the previous one. A crash can drop the last few seconds until the next sync. A new deploy reaches an open PWA on its next load; a page that was already open shows an update notice.
+- **Browser/PWA** — the same frontend as a static site with a WebAssembly Chatmail core in the tab. Mail goes out through a WebSocket proxy on a chatmail relay (the PWA origin and the proxy host can be different domains). A refresh keeps the signed-in account, database included: the browser copy is written when login or an identity restore finishes, when the page goes to the background, and every few seconds, and a copy cut off by a reload is ignored in favour of the previous one. A crash can drop the last few seconds until the next sync. A new deploy reaches an open PWA on its next load; a page that was already open shows an update notice. Serving `app/` without the wasm dist still falls back to a mock core (UI smoke test) or a loopback `velta-core-service`. How to host your own copy: [docs/pwa-self-host.md](docs/pwa-self-host.md).
 
 The UI is plain HTML/CSS/ES modules (no bundler). The backend is the upstream [Delta Chat core](https://github.com/chatmail/core) at version `2.63.0`.
 
@@ -66,6 +66,25 @@ Data lives in `~/Library/Application Support/org.velta/` (accounts) and logs
 in `~/Library/Logs/org.velta/`. Self-update works like on Windows (signed
 updater archive, see "One-click updates"); updates downloaded by the app are
 not quarantined.
+
+</details>
+
+<details>
+<summary>Self-host the browser PWA</summary>
+
+A ready-to-serve tree (wasm-opt + brotli/gzip sidecars) lives on the
+`pwa-dist` branch:
+
+```sh
+git clone --depth 1 --branch pwa-dist --single-branch \
+  https://github.com/pbuzdin/velta.git velta-pwa
+```
+
+Upload `velta-pwa/` except `.git` to any HTTPS host. Mail uses a WebSocket
+proxy on a chatmail relay — the PWA origin and the proxy host can differ;
+the relay must allowlist the PWA origin (`ws_allowed_origins`).
+
+Full steps: [docs/pwa-self-host.md](docs/pwa-self-host.md).
 
 </details>
 
@@ -378,7 +397,9 @@ profiles around).
 The **Welcome to Velta** splash (full-screen, with the same choices: create a
 new profile on a relay — type the address or scan its QR — **add as second
 device** via a `dcbackup:` code, or **restore from a backup** file) is shown
-only while there is no configured profile. Right after creating a profile it
+only while there is no configured profile. The line above the logo is the
+Velta version, the Chatmail core, and either Tauri or the PWA service-worker
+cache. Right after creating a profile it
 politely asks **"How should we call you?"** — a name is optional, Skip keeps
 the default. Returning users with at least one account boot straight into
 the app.
@@ -456,7 +477,9 @@ Once a link is accepted, the drawer shows a **DNS tunnel** row. It opens a
 sheet with the current route and these modes:
 
 - **Automatic** (default): connect directly while the relays answer, and use
-  the tunnel only when nothing but allowlisted sites works.
+  the tunnel only when nothing but allowlisted sites works. If the relays
+  also fail through the tunnel they are down, not blocked, so mail stays
+  direct.
 - **Always**: every connection goes through the tunnel.
 - **Off**: never use the tunnel.
 
@@ -464,7 +487,7 @@ The sheet also has diagnostics you can share and a button to remove the
 tunnel. The tunnel runs as a local SOCKS5 proxy set as each profile's
 `proxy_url`. A proxy you configured yourself always wins over it. Backups and
 second-device transfers leave the tunnel proxy out. Contributed by
-[@mrgluek](https://github.com/mrgluek) (#116, #119). Details:
+[@mrgluek](https://github.com/mrgluek) (#116, #119, #128). Details:
 [`docs/agents/dns-tunnel.md`](docs/agents/dns-tunnel.md).
 
 </details>
@@ -993,7 +1016,8 @@ centered on a soft-black badge for photo-less contacts, and the contact's photo
 as a padded rounded square (with a thin dark ring) for contacts that set one.
 The grid follows the key's fingerprint lines, so the same person looks the
 same on desktop and in the browser. Hex in a display name does not change
-the tile. A contact with no key is colored from their email address.
+the tile. A contact with no key yet (or your own profile before it has an
+address) is the same pattern in greyscale.
 Neighboring cells never share similar hues, all colors are soft (no pure
 black/white), and everything is drawn as pure SVG in `app/js/avatar.js` —
 painted as a CSS background image per tile (one cached image per fingerprint,
@@ -1193,6 +1217,7 @@ by value with their integration notes — lives in
 ├── deltachat-backend/          # Prebuilt deltachat-rpc-server binaries
 │   ├── windows-x86_64/
 │   └── android-arm64/
+├── docs/pwa-self-host.md       # host your own wasm PWA; clone branch pwa-dist
 ├── tools/                      # icon generation, WSL APK build/sign helpers,
 │                               # serve-dev.py (no-cache static server for app/)
 ├── signing/                    # local signing keystore (untracked)
@@ -1214,7 +1239,7 @@ is hand-rolled for Velta.
 | [virtual-scroller](https://github.com/catamphetamine/virtual-scroller) (`virtual-scroller-dom`) | Windowed rendering of the message history with variable-height rows, seamless prepends and scroll restoration | [catamphetamine/virtual-scroller](https://github.com/catamphetamine/virtual-scroller) |
 | [Tauri 2](https://github.com/tauri-apps/tauri) | Desktop/Android shell, deep links, sidecar process | [tauri-apps/tauri](https://github.com/tauri-apps/tauri) |
 | [Delta Chat core 2.63.0](https://github.com/chatmail/core) | The messaging engine (Rust): contacts, chats, e2e crypto, IMAP/SMTP | [chatmail/core](https://github.com/chatmail/core) |
-| [soar](https://github.com/getlantern/soar) (Go, via the `mrgluek/soar` fork) | Optional Android DNS tunnel, built by CI into `libsoartunnel.so` | [getlantern/soar](https://github.com/getlantern/soar) |
+| [soar](https://github.com/getlantern/soar) v0.2.0 (Go) | Optional Android DNS tunnel, built by CI into `libsoartunnel.so` | [getlantern/soar](https://github.com/getlantern/soar) |
 
 Both JS libraries are vendored under `app/vendor/` (no bundler, no `node_modules`
 at runtime). UI icons are individual SVGs from [SVG Repo](https://www.svgrepo.com/).

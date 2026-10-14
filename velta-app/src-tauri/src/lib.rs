@@ -421,20 +421,64 @@ async fn probe_relay(domain: String) -> Result<bool, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Proxy URL for link-preview fetches, or None for a direct fetch. Takes the
+/// first non-empty line (the core's `proxy_url` is a newline-separated list
+/// and the first entry is the active one). Only schemes ureq can speak are
+/// accepted; `socks5h` is mapped to `socks5`, which ureq already resolves on
+/// the proxy side (the tunnel needs that: local DNS may be blocked).
+fn link_preview_proxy(proxy: Option<&str>) -> Result<Option<String>, String> {
+    let Some(first) = proxy
+        .unwrap_or("")
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+    else {
+        return Ok(None);
+    };
+    let (scheme, rest) = first
+        .split_once("://")
+        .ok_or_else(|| "unsupported proxy for link previews".to_string())?;
+    let scheme = match scheme.to_ascii_lowercase().as_str() {
+        "socks5" | "socks5h" => "socks5",
+        "http" => "http",
+        _ => return Err("unsupported proxy for link previews".into()),
+    };
+    if rest.is_empty() {
+        return Err("unsupported proxy for link previews".into());
+    }
+    Ok(Some(format!("{scheme}://{rest}")))
+}
+
+/// The ureq agent for fetch_link_preview: direct without a proxy, through it
+/// otherwise. Err (no agent at all) when the proxy can't be used.
+fn link_preview_agent(proxy: Option<&str>) -> Result<ureq::Agent, String> {
+    let mut builder = ureq::AgentBuilder::new().timeout(std::time::Duration::from_secs(5));
+    if let Some(p) = link_preview_proxy(proxy)? {
+        let p = ureq::Proxy::new(&p).map_err(|_| "unsupported proxy for link previews".to_string())?;
+        builder = builder.proxy(p);
+    }
+    Ok(builder.build())
+}
+
 /// Open Graph preview for the first link in a message. Same trust model as
 /// expand_invite_link: shell-side fetch of a message-derived https URL
 /// (renderer fetch is CORS-blocked and CSP-bound), bounded reads + hard
 /// timeout. Returns null fields when the page has no OG tags; any transport
 /// failure is an Err and the frontend simply renders no card.
+///
+/// `proxy` is the active account's proxy (`proxy_url` when `proxy_enabled`,
+/// the renderer reads it from the core): the user's own SOCKS5/HTTP proxy or
+/// the Android DNS tunnel's local SOCKS5 port (tunnel.rs writes it there).
+/// Both the page and its og:image go through it. Fails closed: a proxy this
+/// client cannot speak (Shadowsocks, HTTPS proxy, garbage) is an Err, and a
+/// dead proxy is a transport Err — never a silent direct fetch.
 #[tauri::command]
-async fn fetch_link_preview(url: String) -> Result<serde_json::Value, String> {
+async fn fetch_link_preview(url: String, proxy: Option<String>) -> Result<serde_json::Value, String> {
     if !url.starts_with("https://") {
         return Err("only https URLs are supported".into());
     }
+    let agent = link_preview_agent(proxy.as_deref())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(5))
-            .build();
         let resp = match agent.get(&url).call() {
             Ok(r) => r,
             Err(_) => return Err("fetch failed".into()),
@@ -1117,7 +1161,7 @@ fn scoped_accounts_path(app: &tauri::AppHandle, path: &str) -> Result<PathBuf, S
         .path()
         .resolve(".", BaseDirectory::AppLocalData)
         .map_err(|e| e.to_string())?;
-    let base_canon = std::fs::canonicalize(&base).unwrap_or_else(|_| base);
+    let base_canon = std::fs::canonicalize(&base).unwrap_or(base);
     if !canon.starts_with(&base_canon) {
         return Err("path outside the app data directory".into());
     }
@@ -1297,6 +1341,7 @@ fn chat_link_token(app: tauri::AppHandle) -> Result<String, String> {
 // the config identifier, the same identity the notification plugin uses.
 #[cfg(target_os = "windows")]
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // tauri command: one arg per JS field
 fn notify_incoming(
     app: tauri::AppHandle,
     title: String,
@@ -1540,7 +1585,7 @@ fn notify_prefs_path(app: &tauri::AppHandle) -> Option<PathBuf> {
 // reads the static loaded from the local-data copy.
 fn notify_prefs_files_dir_copy(app: &tauri::AppHandle, json: &str) {
     #[cfg(target_os = "android")]
-    if let Some(dir) = app.path().resolve("notify-prefs.json", tauri::path::BaseDirectory::AppData).ok() {
+    if let Ok(dir) = app.path().resolve("notify-prefs.json", tauri::path::BaseDirectory::AppData) {
         let _ = std::fs::write(dir, json);
     }
     #[cfg(not(target_os = "android"))]
@@ -1619,7 +1664,7 @@ fn get_battery_status() -> Result<String, String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -1661,7 +1706,7 @@ fn share_text(text: String, title: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2262,7 +2307,7 @@ fn open_in_app_browser(url: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2306,7 +2351,7 @@ fn open_webview_browser(url: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2404,7 +2449,7 @@ fn copy_path_to_content_uri(src: &std::path::Path, uri: &str) -> Result<(), Stri
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2418,7 +2463,7 @@ fn copy_path_to_content_uri(src: &std::path::Path, uri: &str) -> Result<(), Stri
         .l()
         .map_err(|e| e.to_string())?;
     let cr = env
-        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
+        .call_method(context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
         .map_err(|e| e.to_string())?
         .l()
         .map_err(|e| e.to_string())?;
@@ -2546,7 +2591,7 @@ fn resolve_content_uri_blocking(app: tauri::AppHandle, uri: String, filename: St
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -2561,7 +2606,7 @@ fn resolve_content_uri_blocking(app: tauri::AppHandle, uri: String, filename: St
         .map_err(|e| e.to_string())?;
 
     let cr = env
-        .call_method(&context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
+        .call_method(context, "getContentResolver", "()Landroid/content/ContentResolver;", &[])
         .map_err(|e| e.to_string())?
         .l()
         .map_err(|e| e.to_string())?;
@@ -2620,7 +2665,7 @@ fn resolve_content_uri_blocking(app: tauri::AppHandle, uri: String, filename: St
     };
     let dest = app
         .path()
-        .resolve(&format!("uploads/{}", base_name), BaseDirectory::AppLocalData)
+        .resolve(format!("uploads/{}", base_name), BaseDirectory::AppLocalData)
         .map_err(|e| e.to_string())?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
@@ -2994,12 +3039,7 @@ fn find_sidecar(app: &tauri::AppHandle) -> Option<PathBuf> {
         std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("..").join("resources").join(SIDECAR_NAME))).map(|p| p.canonicalize().unwrap_or(p)),
     ];
 
-    for candidate in candidates.into_iter().flatten() {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    candidates.into_iter().flatten().find(|c| c.is_file())
 }
 
 fn accounts_dir(app: &tauri::AppHandle) -> PathBuf {
@@ -3436,7 +3476,7 @@ fn kotlin_notify_incoming(
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3482,7 +3522,7 @@ fn battery_is_exempt() -> Result<bool, String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3500,7 +3540,7 @@ fn battery_request_exemption() -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3520,7 +3560,7 @@ fn install_update_android(path: String) -> Result<(), String> {
     let ctx_guard = APP_CONTEXT.lock().unwrap();
     let context = ctx_guard
         .as_ref()
-        .map(|r| r.as_obj().clone())
+        .map(|r| r.as_obj())
         .ok_or("application context was not handed over yet")?;
     let vm_guard = APP_JAVA_VM.lock().unwrap();
     let vm_ref = vm_guard.as_ref().ok_or("jvm was not handed over yet")?;
@@ -3683,7 +3723,7 @@ pub fn run() {
                     rand::rngs::OsRng.fill_bytes(&mut bytes);
                     data_encoding::HEXLOWER.encode(&bytes)
                 };
-                start_media_server(accounts_dir(&app.handle()));
+                start_media_server(accounts_dir(app.handle()));
             }
 
             log("setup started");
@@ -3962,7 +4002,7 @@ mod media_tests {
 
     // Content: byte i = (i % 251) as u8, so any wrong offset or truncated
     // body produces a different payload.
-    fn make_media_file(dir: &PathBuf, name: &str, len: usize) -> PathBuf {
+    fn make_media_file(dir: &std::path::Path, name: &str, len: usize) -> PathBuf {
         let path = dir.join(name);
         let data: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
         std::fs::write(&path, &data).unwrap();
@@ -4262,5 +4302,79 @@ mod opened_args_tests {
         assert!(!lnk_points_at(&link, &dir.join("other.exe")));
         assert!(!lnk_points_at(&dir.join("missing.lnk"), &exe));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod link_preview_proxy_tests {
+    use super::*;
+
+    #[test]
+    fn no_proxy_is_a_direct_fetch() {
+        assert_eq!(link_preview_proxy(None), Ok(None));
+        assert_eq!(link_preview_proxy(Some("")), Ok(None));
+        assert_eq!(link_preview_proxy(Some(" \n \n")), Ok(None));
+        assert!(link_preview_agent(None).is_ok());
+    }
+
+    #[test]
+    fn socks5_and_http_proxies_are_used() {
+        // the DNS tunnel's own URL shape (tunnel.rs OURS + creds + port)
+        let tunnel = "socks5://velta-tunnel:secret@127.0.0.1:41234";
+        assert_eq!(link_preview_proxy(Some(tunnel)), Ok(Some(tunnel.to_string())));
+        assert_eq!(
+            link_preview_proxy(Some("socks5h://u:p@proxy.example:1080")),
+            Ok(Some("socks5://u:p@proxy.example:1080".to_string()))
+        );
+        assert_eq!(
+            link_preview_proxy(Some("HTTP://proxy.example:3128")),
+            Ok(Some("http://proxy.example:3128".to_string()))
+        );
+        assert!(link_preview_agent(Some(tunnel)).is_ok());
+        assert!(link_preview_agent(Some("http://proxy.example:3128")).is_ok());
+    }
+
+    #[test]
+    fn first_line_of_a_proxy_list_wins() {
+        assert_eq!(
+            link_preview_proxy(Some("\nsocks5://a:1080\nhttp://b:3128")),
+            Ok(Some("socks5://a:1080".to_string()))
+        );
+        // an unusable first entry fails closed instead of falling to the next
+        assert!(link_preview_proxy(Some("ss://abc@h:1\nsocks5://a:1080")).is_err());
+    }
+
+    #[test]
+    fn unusable_proxies_fail_closed() {
+        for p in ["ss://YWVzOnB3@h:8388", "https://proxy.example:443", "socks4://h:1", "tg://socks?server=h", "garbage", "socks5://"] {
+            assert!(link_preview_proxy(Some(p)).is_err(), "{p}");
+            assert!(link_preview_agent(Some(p)).is_err(), "{p}");
+        }
+    }
+
+    #[test]
+    fn a_dead_proxy_never_falls_back_to_direct() {
+        // Nothing listens on the port: the fetch errors instead of going direct.
+        let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let agent = link_preview_agent(Some(&format!("socks5://127.0.0.1:{port}"))).unwrap();
+        assert!(agent.get("https://example.com/").call().is_err());
+    }
+
+    #[test]
+    fn the_fetch_connects_to_the_proxy() {
+        // A listener that reads the SOCKS5 greeting and hangs up: the agent
+        // must dial it (not example.com) and then fail.
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        let seen = std::thread::spawn(move || {
+            use std::io::Read as _;
+            let (mut c, _) = l.accept().unwrap();
+            let mut b = [0u8; 1];
+            c.read_exact(&mut b).unwrap();
+            b[0]
+        });
+        let agent = link_preview_agent(Some(&format!("socks5://127.0.0.1:{port}"))).unwrap();
+        assert!(agent.get("https://example.com/").call().is_err());
+        assert_eq!(seen.join().unwrap(), 5, "SOCKS version byte");
     }
 }

@@ -196,6 +196,7 @@ impl Frame {
 /// Pairing handshake opener frame (only accepted from a not-yet-paired NodeId).
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
+#[allow(clippy::enum_variant_names)] // the variant name is the wire tag ("hello")
 enum Hello {
     Hello {
         token: String,
@@ -764,7 +765,7 @@ impl P2p {
             .nearby
             .iter()
             .filter(|(id, n)| {
-                n.fresh() && inner.peers.get(*id).map_or(true, |p| p.kind != PeerKind::Paired)
+                n.fresh() && inner.peers.get(*id).is_none_or(|p| p.kind != PeerKind::Paired)
             })
             .map(|(id, n)| json!({ "id": id.to_string(), "name": n.name }))
             .collect();
@@ -1002,7 +1003,7 @@ impl P2p {
         std::fs::create_dir_all(&dest_dir)?;
         let id = random_id();
         let dest = dest_dir.join(format!("{id}_{safe}"));
-        std::fs::copy(src, &dest).with_context(|| format!("copy into blobs dir"))?;
+        std::fs::copy(src, &dest).with_context(|| "copy into blobs dir".to_string())?;
         let size = std::fs::metadata(&dest)?.len();
 
         // Frames are built up-front; a mid-send session death loses the tail —
@@ -1535,7 +1536,7 @@ impl P2p {
             .unwrap()
             .peers
             .get(&node_id)
-            .map_or(false, |p| p.kind == PeerKind::Introduced);
+            .is_some_and(|p| p.kind == PeerKind::Introduced);
         if introduced && !frame.is_group() {
             return;
         }
@@ -1645,7 +1646,7 @@ impl P2p {
                 // V-10/#67: concurrency limits on top of the size cap.
                 {
                     let rx = self.rx_files.lock().unwrap();
-                    if rx.get(&(node_id, id.clone())).map_or(false, |t| t.gid.is_some()) {
+                    if rx.get(&(node_id, id.clone())).is_some_and(|t| t.gid.is_some()) {
                         return;
                     }
                     let for_peer = rx.keys().filter(|(n, _)| *n == node_id).count();
@@ -1704,7 +1705,7 @@ impl P2p {
                     let mut rx = self.rx_files.lock().unwrap();
                     let key = (node_id, id.clone());
                     // A group transfer is finished by its own frame only.
-                    if rx.get(&key).map_or(false, |t| t.gid.is_some()) {
+                    if rx.get(&key).is_some_and(|t| t.gid.is_some()) {
                         return;
                     }
                     rx.remove(&key)
@@ -2205,7 +2206,7 @@ impl P2p {
             .unwrap()
             .peers
             .get(&node_id)
-            .map_or(false, |p| p.kind == PeerKind::Introduced);
+            .is_some_and(|p| p.kind == PeerKind::Introduced);
         if !introduced {
             self.sink
                 .emit(json!({ "kind": "presence", "peerId": node_id.to_string(), "online": online }));
@@ -2349,8 +2350,8 @@ impl P2p {
                     "id": m.node_id,
                     "name": name,
                     "self": is_me,
-                    "online": is_me || peer.map_or(false, |p| p.online()),
-                    "introduced": peer.map_or(false, |p| p.kind == PeerKind::Introduced),
+                    "online": is_me || peer.is_some_and(|p| p.online()),
+                    "introduced": peer.is_some_and(|p| p.kind == PeerKind::Introduced),
                 })
             })
             .collect();
@@ -2727,7 +2728,7 @@ impl P2p {
         self.log_sys(inner, &gid, sys_epoch, sys);
         // A chat the user already deleted was only kept to tell the creator
         // about a leave; now that the creator answered, nothing is left.
-        if inner.groups.get(&gid).map_or(false, |r| r.hidden && !r.pending_leave) {
+        if inner.groups.get(&gid).is_some_and(|r| r.hidden && !r.pending_leave) {
             self.purge_group(inner, &gid);
             return Ok(json!({ "result": result }));
         }
@@ -2900,7 +2901,7 @@ impl P2p {
             }
             Frame::GroupLeave { gid } => self.on_group_leave(inner, from, &gid),
             Frame::Typing { gid: Some(gid), on } => {
-                let member = inner.groups.get(&gid).map_or(false, |r| !r.removed && r.state.contains(&from));
+                let member = inner.groups.get(&gid).is_some_and(|r| !r.removed && r.state.contains(&from));
                 if member && self.typing_gate(inner, &gid, from, on) {
                     let name = inner.peers.get(&from).map(|p| p.name.clone()).filter(|n| !n.is_empty());
                     self.sink.emit(json!({
@@ -2909,17 +2910,17 @@ impl P2p {
                     }));
                 }
             }
-            Frame::GroupGone { gid } => {
-                // Believed only about the sender itself.
-                if inner.groups.get(&gid).map_or(false, |r| !r.removed && r.state.contains(&from)) {
+            // Believed only about the sender itself.
+            Frame::GroupGone { gid }
+                if inner.groups.get(&gid).is_some_and(|r| !r.removed && r.state.contains(&from)) => {
                     inner.grt.links.remove(&(gid.clone(), from));
                     inner.grt.gone.insert((gid, from));
                 }
-            }
             _ => {}
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn on_group_sync(
         &self,
         inner: &mut Inner,
@@ -3105,7 +3106,7 @@ impl P2p {
         let ok = inner
             .groups
             .get(gid)
-            .map_or(false, |r| r.state.creator == me && !r.removed && r.state.contains(&from) && from.to_string() != me);
+            .is_some_and(|r| r.state.creator == me && !r.removed && r.state.contains(&from) && from.to_string() != me);
         if !ok {
             return; // only the creator edits the roster
         }
@@ -3135,7 +3136,7 @@ impl P2p {
     fn on_typing(&self, from: NodeId, on: bool, tx: &FrameTx) {
         let mut guard = self.inner.lock().unwrap();
         let inner = &mut *guard;
-        let ok = inner.peers.get(&from).map_or(false, |p| {
+        let ok = inner.peers.get(&from).is_some_and(|p| {
             p.kind == PeerKind::Paired && p.live.iter().any(|h| h.proto >= 2 && h.tx.same_channel(tx))
         });
         if ok && self.typing_gate(inner, "", from, on) {
@@ -3152,7 +3153,7 @@ impl P2p {
         if inner.peers.get(&id).map(|p| p.kind) != Some(PeerKind::Paired) {
             bail!("unknown peer");
         }
-        Ok(v2_tx(&inner.peers, &id).map_or(false, |tx| tx.send(Frame::Typing { gid: None, on }).is_ok()))
+        Ok(v2_tx(&inner.peers, &id).is_some_and(|tx| tx.send(Frame::Typing { gid: None, on }).is_ok()))
     }
 
     /// Same for a group: every other member with a live protocol-2 session.
@@ -3362,6 +3363,7 @@ impl P2p {
 impl P2p {
     /// Online (protocol-2, in-step) members of `gid` other than me, and the
     /// rest of the roster. Caller holds the engine lock.
+    #[allow(clippy::type_complexity)]
     fn group_file_targets(&self, inner: &Inner, gid: &str) -> Result<(Vec<(NodeId, FileLink)>, Vec<NodeId>)> {
         let me = self.node_id();
         let rec = inner.groups.get(gid).ok_or_else(|| anyhow!("unknown group"))?;
@@ -3549,7 +3551,7 @@ impl P2p {
             if !t.path.is_file() {
                 bail!("the original file is gone");
             }
-            if t.members.get(&key).map_or(false, |m| m.state == "sending" || m.state == "done") {
+            if t.members.get(&key).is_some_and(|m| m.state == "sending" || m.state == "done") {
                 bail!("already sending or delivered");
             }
             t.members.insert(key, MemberXfer { state: "sending", sent: 0, handle: link.handle });
@@ -3641,7 +3643,7 @@ impl P2p {
                 .unwrap()
                 .get(&id)
                 .and_then(|t| t.members.get(&key))
-                .map_or(false, |m| m.handle == link.handle);
+                .is_some_and(|m| m.handle == link.handle);
             if current {
                 self.group_file_set(&id, &key, "failed", None);
             }
@@ -3705,7 +3707,7 @@ impl P2p {
         let hit: Vec<String> = {
             let x = self.group_xfers.lock().unwrap();
             x.iter()
-                .filter(|(_, t)| t.members.get(&key).map_or(false, |m| m.state == "sending" && m.handle == handle))
+                .filter(|(_, t)| t.members.get(&key).is_some_and(|m| m.state == "sending" && m.handle == handle))
                 .map(|(id, _)| id.clone())
                 .collect()
         };
@@ -3749,7 +3751,7 @@ impl P2p {
                 .get(&from)
                 .and_then(|p| p.live.iter().find(|h| h.tx.same_channel(tx)))
                 .map_or(0, |h| h.proto);
-            proto >= 2 && inner.groups.get(&gid).map_or(false, |r| !r.removed && r.state.contains(&from))
+            proto >= 2 && inner.groups.get(&gid).is_some_and(|r| !r.removed && r.state.contains(&from))
         };
         let fid = match &frame {
             Frame::GroupFileBegin { id, .. } | Frame::GroupFileChunk { id, .. } | Frame::GroupFileEnd { id, .. } => id.clone(),
@@ -3775,7 +3777,7 @@ impl P2p {
                 {
                     let rx = self.rx_files.lock().unwrap();
                     // A restarted (retried) transfer replaces its own old try.
-                    if rx.get(&key).map_or(false, |t| t.gid.is_none()) {
+                    if rx.get(&key).is_some_and(|t| t.gid.is_none()) {
                         return;
                     }
                     let replacing = rx.contains_key(&key);
@@ -3839,7 +3841,7 @@ impl P2p {
             Frame::GroupFileEnd { id, .. } => {
                 let t = {
                     let mut rx = self.rx_files.lock().unwrap();
-                    if !rx.get(&key).map_or(false, |t| t.gid.as_deref() == Some(gid.as_str())) {
+                    if !rx.get(&key).is_some_and(|t| t.gid.as_deref() == Some(gid.as_str())) {
                         return;
                     }
                     rx.remove(&key).expect("checked above")
@@ -3866,7 +3868,7 @@ impl P2p {
                     let mut guard = self.inner.lock().unwrap();
                     let inner = &mut *guard;
                     // Left or removed while the last chunk was in flight.
-                    if !inner.groups.get(&gid).map_or(false, |r| !r.removed && r.state.contains(&from)) {
+                    if !inner.groups.get(&gid).is_some_and(|r| !r.removed && r.state.contains(&from)) {
                         let _ = std::fs::remove_file(&final_path);
                         return;
                     }
@@ -5154,7 +5156,8 @@ mod tests {
             kind: PeerKind::Paired, name: "A".into(), addrs: vec![], proto: 2,
             live: vec![], connecting: false, queued: vec![], msgs: vec![],
         });
-        for id in [c] {
+        {
+            let id = c;
             creator.inner.lock().unwrap().peers.insert(id, Peer {
                 kind: PeerKind::Paired, name: "C".into(), addrs: vec!["10.9.9.9:1".parse().unwrap()], proto: 2,
                 live: vec![], connecting: false, queued: vec![], msgs: vec![],
@@ -5618,7 +5621,7 @@ mod tests {
         let (me, rx, cr, d, gid) = unit_member("grp-rej").await;
         let author = cr.node_id();
         let (tx, mut out) = attach_live(&me, author, 2);
-        let stored = |me: &Arc<P2p>| chat_rows(&me, &gid, 50).len();
+        let stored = |me: &Arc<P2p>| chat_rows(me, &gid, 50).len();
 
         // `from` must be the authenticated session node.
         me.handle_frame(author, gmsg(&gid, &d, 1, "pretending to be d"), &tx);
@@ -5896,7 +5899,7 @@ mod tests {
         let ev: Vec<Value> = events(&rx).into_iter().filter(|e| e["kind"] == "group-typing").collect();
         assert_eq!(ev.len(), 1);
         assert_eq!((ev[0]["gid"].as_str(), ev[0]["from"].as_str(), ev[0]["on"].as_bool()), (Some(gid.as_str()), Some(d.to_string().as_str()), Some(true)));
-        assert!(ev[0]["name"].as_str().map_or(false, |n| !n.is_empty()));
+        assert!(ev[0]["name"].as_str().is_some_and(|n| !n.is_empty()));
         cr.handle_frame(d, Frame::Typing { gid: Some("00000000000000000000000000000000".into()), on: true }, &td);
         let outsider = add_fake_peer(&cr, PeerKind::Paired, 2);
         let (otx, _orx) = attach_live(&cr, outsider, 2);
@@ -6024,7 +6027,7 @@ mod tests {
         until(60, "full mesh", || {
             others.iter().all(|(x, _)| {
                 let inner = x.inner.lock().unwrap();
-                members.iter().filter(|m| **m != x.node_id()).all(|m| inner.peers.get(m).map_or(false, |p| p.online()))
+                members.iter().filter(|m| **m != x.node_id()).all(|m| inner.peers.get(m).is_some_and(|p| p.online()))
             })
         })
         .await;
@@ -6074,7 +6077,7 @@ mod tests {
         until(20, "B and C receive the roster", || !b.groups().is_empty() && !c.groups().is_empty()).await;
         let (bid, cid) = (b.node_id(), c.node_id());
         until(40, "B and C connect through the introduction", || {
-            let live = |e: &Arc<P2p>, o: &NodeId| e.inner.lock().unwrap().peers.get(o).map_or(false, |p| p.online());
+            let live = |e: &Arc<P2p>, o: &NodeId| e.inner.lock().unwrap().peers.get(o).is_some_and(|p| p.online());
             live(&b, &cid) && live(&c, &bid)
         })
         .await;
@@ -6170,7 +6173,7 @@ mod tests {
         // E is a paired contact of A only.
         pair(&t.a, &t.a_rx, &e).await;
         let eid = e.node_id();
-        until(15, "E has a session to A", || e.inner.lock().unwrap().peers.get(&aid).map_or(false, |p| p.online())).await;
+        until(15, "E has a session to A", || e.inner.lock().unwrap().peers.get(&aid).is_some_and(|p| p.online())).await;
         events(&t.a_rx);
         let etx = e.inner.lock().unwrap().peers[&aid].live[0].tx.clone();
         // Even knowing the gid, E can neither post nor impersonate a member.
@@ -6190,7 +6193,7 @@ mod tests {
         events(&t.b_rx);
         e.retry(&bid.to_string()).unwrap();
         tokio::time::sleep(Duration::from_secs(3)).await;
-        assert!(t.b.inner.lock().unwrap().peers.get(&eid).is_none());
+        assert!(!t.b.inner.lock().unwrap().peers.contains_key(&eid));
         assert!(events(&t.b_rx).iter().all(|ev| ev["kind"] != "group-message" && ev["kind"] != "pairing"));
         // …and E's group frames never reached B's log.
         assert!(chat_rows(&t.b, &t.gid, 10).is_empty());
@@ -6314,7 +6317,7 @@ mod tests {
             assert!(e.group_send(&t.gid, "nope", None, None).is_err());
             assert_eq!(e.groups()[0]["removed"], true);
             // History stays readable.
-            assert_eq!(chat_rows(&e, &t.gid, 10).len(), 1);
+            assert_eq!(chat_rows(e, &t.gid, 10).len(), 1);
         }
     }
 
@@ -6709,7 +6712,7 @@ mod tests {
         let id = r["id"].as_str().unwrap().to_string();
         assert_eq!(r["members"].as_array().unwrap().len(), 2);
         assert!(r["members"].as_array().unwrap().iter().all(|m| m["state"] == "sending"));
-        until(10, "the first credits are used", || rb.len() >= 1 + GROUP_FILE_CREDITS).await;
+        until(10, "the first credits are used", || rb.len() > GROUP_FILE_CREDITS).await;
         tokio::time::sleep(Duration::from_millis(300)).await;
         let first = drain(&mut rb);
         assert_eq!(
@@ -6765,7 +6768,7 @@ mod tests {
         let err = a.group_send_file(&gid, &path, "x.txt", "").unwrap_err().to_string();
         assert!(err.contains("online"), "nobody online: {err}");
         assert!(read_log(&a.dir, &gid).iter().all(|r| r.file.is_none()), "nothing logged on failure");
-        assert!(!a.blobs_dir.join(format!("g-{gid}")).read_dir().map_or(false, |mut d| d.next().is_some()), "copy cleaned up");
+        assert!(!a.blobs_dir.join(format!("g-{gid}")).read_dir().is_ok_and(|mut d| d.next().is_some()), "copy cleaned up");
 
         let (_tb, mut rb) = attach_live(&a, b, 2);
         let (_tv, mut rv) = attach_live(&a, v, 1);
@@ -6816,7 +6819,7 @@ mod tests {
         let before_d = rd.len();
         a.group_file_retry(&gid, &id, &b.to_string()).unwrap();
         assert_eq!(st(&b), "sending");
-        until(10, "retry frames", || rb2.len() >= 1 + GROUP_FILE_CREDITS).await;
+        until(10, "retry frames", || rb2.len() > GROUP_FILE_CREDITS).await;
         let frames = drain(&mut rb2);
         assert!(matches!(frames[0], Frame::GroupFileBegin { size, .. } if size == data.len() as u64), "restarts from byte zero");
         assert_eq!(rd.len(), before_d, "D was not sent anything new");

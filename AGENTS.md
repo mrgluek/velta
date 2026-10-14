@@ -22,9 +22,12 @@ build/test commands, and conventions as they actually exist in this checkout.
 - **Background Android service** (`velta-core-service/`) — a headless APK that runs
   the core as a foreground service and exposes it to the PWA over a loopback
   WebSocket/HTTP bridge.
-- **Standalone browser** (work in progress) — the PWA can be served from a
-  static host and falls back to a mock core for demo/development. This is
-  not a supported release target.
+- **Standalone browser** — the wasm PWA dist (`scripts/build-pwa.mjs`) is a
+  static site with the Chatmail core in a worker. Mail uses a WebSocket
+  proxy on a chatmail relay; the PWA origin and the proxy host can differ
+  (`docs/pwa-self-host.md`). Self-hosters clone the `pwa-dist` orphan
+  branch (prebuilt + `.wasm.br`/`.gz`, force-pushed, never merged). Serving
+  plain `app/` still falls back to a mock core (UI smoke test).
 
 The unifying frontend is in `app/` (vanilla JavaScript, custom web components,
 no bundler). It auto-detects the available backend via `app/js/transport.js` and
@@ -58,11 +61,12 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   │   ├── bare-links.js     # scheme-less link detection (t.me/x, example.com) for markdown.js: TLD tiers, boundaries (#85)
 │   │   ├── media.js          # media URL helpers: blobfile:// protocol (boot-probed) → loopback server → asset protocol + per-element fallback
 │   │   ├── p2p.js            # Local chat UI: drawer toggle, list card, pairing, legacy 1:1 modal (Tauri only)
+│   │   ├── tunnel.js         # optional Android DNS tunnel UI: deep link, drawer row, settings sheet, diagnostics (#116/#119/#128)
 │   │   ├── read-markers.js   # manual "read up to here" markers per (account, chat), localStorage-only
 │   │   ├── qr-actions.js     # QR screen logic: scan-tab/share availability, copy/share link, scanned-code classification (#37)
 │   │   ├── share-in.js       # inbound share (#97): text/file payloads; invite and chat links stay on the deeplink router
 │   │   ├── qr-scan.js        # code acquisition: paste or camera scan (native BarcodeDetector probed with a 2s timeout, vendored jsQR fallback (`app/vendor/jsQR.js`, minified ~131 KB, loaded on demand) — many Android WebViews ship no Shape Detection API or one whose detect() hangs)
-│   │   ├── format.js         # time/size/pageBounds helpers; timeTag/stampTime emit <time datetime>
+│   │   ├── format.js         # time/size/pageBounds helpers; timeTag/stampTime emit <time datetime>; formatSplashVersion (#127)
 │   │   ├── mock-core.js      # in-memory demo core implementing the JSON-RPC surface (NOT in the prod import graph: transport imports it dynamically)
 │   │   ├── rpc-core.js       # JsonRpcCore wrapper over transports + event mapping
 │   │   ├── transport.js      # backend auto-detection (Tauri, WebSocket, HTTP, mock)
@@ -130,6 +134,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   └── android-arm64/
 │
 ├── signing/                  # local signing keystore (untracked)
+├── design/                   # token snapshot of app/css/main.css (HTML + SVG); restamp header with APP_VERSION
 ├── docs/agents/              # per-subsystem agent notes (webxdc, relays,
 │                              p2p/local chat, android-shell, media,
 │                              onboarding, security-triage) — referenced from §5/§11
@@ -146,12 +151,13 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 ├── docs/research/wasm-core-mail-proxy-spike.md    # wasm spike log, day-by-day — status header = current state
 ├── docs/research/wasm-core-landing-checklist.md   # landing gate: every ⬜→✅ box; master core/ stays stock until green
 ├── docs/research/wasm-core-lock-landing-plan.md   # ordered review/merge steps for the core/Cargo.lock diff at landing
+├── docs/pwa-self-host.md          # host your own wasm PWA; Quick start = clone branch pwa-dist; origin A + WS proxy on B
 ├── docs/relay-modules.md          # install / configure / uninstall: invite-only signup and the WebSocket proxy
 ├── docs/research/websockify-c3-deploy.md          # C3 runbook: deploy the websockify-c3 relay, verify, RELAY_WS_URL e2e
 ├── docs/research/ws-relay-endpoints-probe.md      # external WS endpoints vs the C3 contract — chatmail.uk /ygg-ws = Yggdrasil peering, not a mail tunnel (10-09)
 ├── docs/research/wasm-patches/   # 10-patch wasm series (series.txt, VENDORED.md, pinned locks + PROVENANCE)
 ├── packages/deltachat-wasm/      # MPL wasm wrapper — README = local wasm-pack build + e2e recipes
-├── scripts/build-pwa.mjs         # C4 PWA dist builder (app/ + wasm assets + pwa-config.js + precache SW); refuses a wasm without sqlite_export unless --allow-no-db-persist — §4.2.1
+├── scripts/build-pwa.mjs         # C4 PWA dist builder (app/ + wasm assets + pwa-config.js + precache SW + wasm.br/gz sidecars not in PRECACHE); refuses a wasm without sqlite_export unless --allow-no-db-persist — §4.2.1; ship snapshot is git branch pwa-dist
 ├── scripts/relay-invite/         # invite-only signup: invite.py CGI (interstitial + claim) + invite-tool.py CLI + README (deploy/features/troubleshooting) — deployed to the private relay (§4.2.1 relay-list bullet)
 ├── scripts/verify-pwa-dist.mjs   # PWA dist rig: 10 checks (boot, OPFS persist incl. sqlite/, SW, identity-backup surface)
 └── tools/                    # icon generation, WSL APK build/sign helpers,
@@ -305,9 +311,9 @@ There is **no build step** for the PWA. Open `app/index.html` directly in a
 browser, or serve `app/` from any static web server. The app will use the mock
 core unless a real backend is reachable. That also makes it the fastest
 renderer smoke test: serve `app/` over plain http, and full UI flows are
-drivable in demo mode (no Tauri build needed). The standalone PWA product
-(a static host talking to a remote core) is work in progress; demo mode
-here is only the UI smoke test. **KEEP:** every new
+drivable in demo mode (no Tauri build needed). The wasm mail dist is
+§4.2.1; self-hosting it is `docs/pwa-self-host.md`. Demo mode here is
+only the UI smoke test. **KEEP:** every new
 `rpc-core.js` method needs a `mock-core.js` counterpart or demo mode throws
 "not a function" the moment the UI touches it. Demo honesty (1.4.52, #53; demo image attachments are SVG data URIs pinned by `tests/mock-images.test.mjs` — #74;
 MDN arrival added 1.4.53, #59): MockCore never *invents* read receipts —
@@ -349,6 +355,15 @@ node scripts/build-pwa.mjs [--ws-proxy wss://host/path] [--wasm-opt [BIN]]
 node scripts/verify-pwa-dist.mjs
 ```
 
+Self-host (any HTTPS origin, including a PWA on domain A talking to a
+WebSocket proxy on domain B): `docs/pwa-self-host.md`. Quick start is
+`git clone --depth 1 --branch pwa-dist` — that branch is an orphan
+snapshot of `build/dist-pwa` (wasm-opt + `.wasm.br`/`.wasm.gz`, empty
+`wsProxyUrl`) and is **force-pushed**, never merged into master. The
+builder writes the sidecars and keeps them out of the SW precache
+(`scripts/build-pwa.mjs`). Refresh the branch after a dist rebuild:
+orphan commit of the dist tree, `git push --force origin HEAD:pwa-dist`.
+
 Deploy-dist rules (10-09):
 - Relay deploys build with NO `--ws-proxy` — the deployed `pwa-config.js`
   must keep `wsProxyUrl: ""` (private relay domains never ride the artifact;
@@ -360,9 +375,10 @@ Deploy-dist rules (10-09):
   `node tools/binaryen/node_modules/binaryen/bin/wasm-opt -Os
   build/wasm-dist/deltachat_wasm_bg.wasm -o <same file>` → then build
   WITHOUT the flag so the SW content hash covers the optimized bytes
-  (28.4 → 17.7 MB on 1.4.62's wasm; 28.6 → 17.6 MB on the 2.63 wasm
-  deployed 2026-10-11, SW `velta-pwa-c1075b34fbe7`).
-- Deploy steps (10-13): wasm with `sqlite_*` → optimize → build →
+  (28.4 → 17.7 MB on 1.4.62's wasm; 28.7 → 16.8 MB on the 2.63 wasm
+  deployed 2026-10-14, SW `velta-pwa-3b497112c3bd`).
+- Deploy steps (10-13): wasm with `sqlite_*` → optimize → move
+  `app/.mimosa` and `app/js/.mimosa` out → build (no `--ws-proxy`) →
   verify-pwa-dist (10 PASS) → upload the WHOLE dist including `sw.js` →
   check the served `sw.js` VERSION changed. Clients pick it up on the next
   load or foreground (`reg.update()`); a page that was already open gets
@@ -1297,15 +1313,16 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   never expire. `parseFingerprint` reads only the grouped fingerprint lines,
   so hex in a display name or address is not part of the key. The block is
   the one whose address matches. No parsed key hashes the address (the
-  element `addr`, or `addrOf`). Self has no core fingerprint (contact 1
-  errors), so that tile follows the address too. **Greyscale rule
-  (7ef758c):** a tile not backed by a real key — any contact without a
-  parsed fingerprint, or self with no address yet (profile not configured)
-  — is drawn in greyscale (`mono`, `monoFill` = luma grey, no color-name
-  captions) and the profile key row shows "—"; configured self stays in
-  color. `cachedFingerprintIsDerived(id)` tells components which; derived
-  entries are dropped on `setFingerprintSource` so they re-resolve after
-  configure / key arrival (`tests/avatar-mono.test.mjs`). Chat list and chat head
+  element `addr`, or `addrOf`). **Greyscale rule (7ef758c):** a tile not
+  backed by a real OpenPGP fingerprint is greyscale (`mono`, `monoFill` =
+  luma grey, no color-name captions) and the profile key row shows "—".
+  Contact 1 makes `get_contact_encryption_info` throw; the real self key
+  comes from `make_vcard([1])` → `fingerprintFromVcard` (wired as
+  `selfFingerprint`). An address hash is never shown as a profile key —
+  that used to paint a different tile than the contact others see.
+  `cachedFingerprintIsDerived(id)` tells components which; derived entries
+  are dropped on `setFingerprintSource` so they re-resolve after configure
+  / key arrival (`tests/avatar-mono.test.mjs`). Chat list and chat head
   pass `addr` when the contact has one. Same key, same tile on every shell.
 - **Profile sheet (`showChatInfo`) hydration contract**: the full contact
   (real avatar, bot flag, presence) is fetched whenever `chat.contact` is
@@ -1507,7 +1524,18 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   model as `expand_invite_link`: https-only, 5 s timeout, 256 KB page /
   512 KB image cap) and inlines og:image as a `data:` URL (CSP img-src has
   `data:` everywhere; remote hosts stay out). In-memory cache per URL;
-  failed fetches cached as null. Never fetched: a registered invite URL
+  failed fetches cached as null. **Proxy/tunnel:** the page and og:image
+  go through the active account's proxy — app.js registers
+  `setLinkPreviewProxySource` (reads `proxy_enabled` + `proxy_url`, first
+  list entry), so the user's own SOCKS5/HTTP proxy and the Android DNS
+  tunnel (tunnel.rs writes its `socks5://velta-tunnel:…@127.0.0.1` URL into
+  `proxy_url`) both apply; `fetch_link_preview(url, proxy)` builds the ureq
+  agent in `link_preview_agent` (ureq `socks-proxy` feature; SOCKS5 resolves
+  the host on the proxy side). Fails closed: no reader / a failed config read
+  means no fetch (not cached, retried on the next render), and a proxy ureq
+  can't speak (`ss://`, `https://`, `socks4`) or a dead one is an Err — never
+  a direct fetch. `expand_invite_link`, `probe_relay` and `fetch_page_title`
+  still fetch directly. Never fetched: a registered invite URL
   (already an invite card) and any `deltachat.id` URL (short username
   links are invite cards; the rest of that host is the same service).
   Setting: drawer → “Link previews” radios, and the same three on the
@@ -1590,7 +1618,18 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   "Service worker" line is the cache name from §4.2.1, and "WebSocket
   relays" opens the list there. The drawer head shows the avatar (self
   profile sheet via `onProfile`), display name, Edit profile and Switch
-  account (`.acct-pop` dropdown, current checked). `.qr-box` carries no
+  account — a native `<details class="acct-switch">` whose `<summary>` is
+  the pill and whose `.acct-pop` content lists the profiles (current one
+  checked + `aria-current`). It opens with no JS; `wireDisclosure()` adds
+  outside-tap/Escape close only while open (attached from the async
+  `toggle` event, so the opening tap can't close it), a pick or drawer
+  close sets `open = false`. Do NOT go back to `popover`/`popovertarget`
+  or a `hidden` toggle. `rebuildDrawer()` calls the old drawer's
+  `destroy()` (drops its document listeners) and re-opens the new drawer
+  and switcher if they were open — rebuilds land asynchronously (boot,
+  refreshAccounts, tunnel status, profile/relay edits) and used to drop
+  the open menu/drawer and leak the old drawer's capture `pointerdown`
+  listener. Tests: `tests/account-switcher.test.mjs`. `.qr-box` carries no
   background/border of its own — the core's QR SVG is self-contained.
   **Native controls (2026-10-07):** the top eight rows of
   `docs/native-elements.md` are in the app (counts in "What landed"); the
@@ -1713,6 +1752,10 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   empty string clears a description. 1:1 keeps Send / Edit name (the local
   custom name) / Block, and a contact's bio stays read-only. Descriptions
   are applied only when changed (group edits inform members core-side).
+  PWA/wasm: `pickProfileImage` writes the file to `/uploads/` via
+  `writeCoreFile` before `setAvatar` / `setChatImage` — a data URL is not
+  a path (core looks for `/data:image/...`). Mock has no `writeCoreFile`
+  and still stores the data URL. `tests/avatar-upload.test.mjs`.
   MockCore mirrors all the methods —
   `tests/description-edit.test.mjs` pins the wrapper arguments and the mock
   roundtrips. KEEP: call `modalHistorySettled()` before reopening the sheet
@@ -1879,6 +1922,10 @@ replies; applies regardless of which tools or modes are active.)
   `setuptools`.
 
 ### 6.4 Visual design
+- Token snapshot: `design/velta-design-system.html` + `.svg`. Header version
+  matches APP_VERSION. 2px spacing grid; odd steps on the ladder are amber
+  documented exceptions (bubble `7 10 6`, composer `13`, ±5 media bleed,
+  pin-tray `9`) — do not snap them to even pixels.
 - **No pure black or pure white.** Opaque text and surface colors stay in the
   soft families: whites `#f2f2f5`/`#f4f4f4`, blacks `#0b0b10`–`#1c1c26`
   (`avatar.js` states the rule for fingerprint tiles; keep it everywhere).
@@ -1928,14 +1975,14 @@ Skip Lighthouse for the installed app; it's only weakly useful for PWA mode.
 ### 6.6 Public-repo hygiene — private relay identifiers (hard rule)
 
 This repo is public; the operator's relay is private. NEVER commit the
-relay's domain, its IP, the hosting-provider name, or bare `a7` used as a
-host — not in code, docs, tests, commit messages, issue text, or release
+relay's domain, its IP, the hosting-provider name, or the short host
+label — not in code, docs, tests, commit messages, issue text, or release
 notes. Docs and tests use `relay.example.org` / `<relay-domain>` /
 `<relay-ip>` placeholders. Before EVERY push, this sweep must be empty
 (binary PNG hits are fine):
 
 ```bash
-git grep -nE "a7\.velta\.cc|aeza|95\.181\.162\.170|\ba7\b" -- '*.md' '*.mjs' '*.js' '*.rs' '*.toml' '*.json'
+git grep -nE "aeza|95\.181\.162\.170|\ba7\b" -- '*.md' '*.mjs' '*.js' '*.rs' '*.toml' '*.json'
 ```
 
 On 2026-10-09 the identifiers leaked into 6 commits across 2 sessions and
@@ -1965,7 +2012,7 @@ next push or the tainted commits come back.
 ### 7.2 Frontend
 
 Regression suites (Node's built-in test runner, no dependencies). Run the
-whole set — 66 files, 516 tests as of 2026-10-13:
+whole set — 72 files, 543 tests as of 2026-10-14:
 
 ```bash
 node --test tests/
@@ -1982,8 +2029,11 @@ funnel (`sync-only-active.test.mjs`), wasm worker boot/checkpoint ordering
 driven through the real worker script (`wasm-boot-order.test.mjs`), the
 identity-backup crypto + restore-ordering pins (`identity-backup.test.mjs`),
 the refresh lock wait (`wasm-session.test.mjs`),
+numbered OPFS snapshots + sqlite export (`wasm-opfs-snapshot.test.mjs`),
+identity-restore checkpoint-before-reload and SW update (`pwa-update-and-restore.test.mjs`),
 backup export naming/gating + gzip round-trip (`backup-export.test.mjs`),
-PWA notifications + wake-lock wiring (`pwa-notify-wakelock.test.mjs`), and
+PWA notifications + wake-lock wiring (`pwa-notify-wakelock.test.mjs`),
+the splash version line (`splash-version.test.mjs`), and
 the modal-history
 contract — join-invite confirms AND the add-relay reopen points
 (`join-invite-flow.test.mjs`).
@@ -2076,6 +2126,22 @@ test traffic accordingly.
   `make-python-testenv.sh`, `make-rpc-testenv.sh`.
 
 ---
+
+### Bounded in-memory caches (`app/js/lru.js`)
+
+Renderer caches use the shared `LruCache` (Map-backed; evicts LRU while over
+`maxItems` OR `maxBytes`; bytes = string length×2 or a `sizeOf` fn;
+`canEvict` pins entries, `onEvict` hook). Don't add a plain `Map` cache that
+grows per contact/URL/message, and don't use WeakMap for string keys.
+Limits (agreed: ~2 MB or 100 items, whichever first): avatar `svgCache` /
+`bgCache`, link-preview `CACHE` (in-flight promises removed on settle),
+webxdc `infoCache` (also cleared on account switch). Exceptions:
+chat-view `_rowCache`/`_rowSigCache` 300 rows, never evicting a row that
+`isConnected`, eviction drops the signature too; avatar `fprCache` 1000
+contacts (pending promises pinned); rpc-core `msgIdCache` 20 chats / 2 MB.
+webxdc `serials` stays a plain Map on purpose: it is the delivered-serial
+watermark, evicting it would re-post old updates; it is per-instance-delete
+and account-switch cleared. Tests: `tests/lru-caches.test.mjs`.
 
 ## 8. Security considerations
 
@@ -2185,28 +2251,26 @@ test traffic accordingly.
 
 ## 9. Deployment and runtime architecture
 
-### 9.1 PWA served statically (work in progress)
+### 9.1 PWA served statically
 
-The browser PWA is not a supported release. These notes describe the
-plain `app/` dev path. The wasm mail dist is §4.2.1; the DEPLOYED dist
-(private relay, `/var/www/html/app`) precaches the whole app shell + wasm in
-a content-hash-named SW cache and, since 10-09 (SW `velta-pwa-…819b…`),
-posts OS notifications through that SW (§ notification taps above) —
-the vestigial-SW caveat below applies only to the plain-`app/` dev path.
+Plain `app/` is the UI smoke test (mock core, or loopback
+`velta-core-service`). The wasm mail product is the C4 dist (§4.2.1);
+how to host your own copy, including a PWA on origin A with the
+WebSocket proxy on origin B, is `docs/pwa-self-host.md`. The deployed
+dist precaches the app shell + wasm in a content-hash-named SW cache
+and, since 10-09, posts OS notifications through that SW (§ notification
+taps above). The vestigial-SW caveat below applies only to plain `app/`.
 
-- Serve the contents of `app/` over HTTPS.
-- The service worker is unregistered at boot (stale-JS-upgrade incidents —
-  see §4.2); `sw.js` is vestigial and nothing caches the app shell in a
-  plain browser.
+- Self-hosters clone `pwa-dist` (`docs/pwa-self-host.md` Quick start) and
+  upload that tree except `.git`. From-source path: serve `build/dist-pwa/`
+  over HTTPS (whole tree, including `sw.js` and the `.wasm.br`/`.gz`
+  sidecars). Refresh `pwa-dist` after a dist rebuild: orphan commit,
+  `git push --force origin HEAD:pwa-dist`. Never merge that branch.
+- Plain `app/`: the service worker is unregistered at boot (stale-JS-upgrade
+  incidents — see §4.2); nothing caches that tree.
 - If `deltachat-rpc-server` or the Android service is running on the same
-  device, the app connects over loopback WebSocket/HTTP; otherwise it falls
-  back to the mock core.
-- **Direction (since 1.3.29):** the PWA's target deployment is a *remote*
-  core service reached over WSS/TLS — `transport.js` currently hardwires the
-  loopback endpoints (`ws://127.0.0.1:20808`, `http://127.0.0.1:20809`), and
-  a remote transport will replace them. CSP implication when adding
-  origins: the meta CSP in `index.html` must learn every new origin
-  alongside the Tauri conf copies (§8).
+  device, plain `app/` connects over loopback WebSocket/HTTP; otherwise it
+  falls back to the mock core. The wasm dist never uses that loopback path.
 
 ### 9.2 Tauri desktop/Android app
 
@@ -2373,6 +2437,7 @@ talks to Google.
 | Type-check the Android shell | `wsl -e bash -lc "cd /mnt/c/Users/pave/Velta/velta/velta-app/src-tauri && cargo check --target aarch64-linux-android"` (desktop `cargo check` compiles the `cfg(target_os = "android")` code OUT — it proves nothing about JNI/Rust-side Android code) |
 | Run Tauri dev | `cd velta-app && cargo tauri dev` |
 | Serve PWA locally | `cd app && python -m http.server 8080` |
+| Self-host PWA (prebuilt) | `git clone --depth 1 --branch pwa-dist --single-branch https://github.com/pbuzdin/velta.git velta-pwa` — upload except `.git`; recipe `docs/pwa-self-host.md`. Refresh: orphan commit of `build/dist-pwa`, `git push --force origin HEAD:pwa-dist` (never merge) |
 | Diagnose service | Open `http://localhost:8080/diag.html` |
 | Run Python CFFI tests | `cd core/python && pytest` |
 | Run Python RPC tests | `cd core/deltachat-rpc-client && pytest` |
@@ -2684,9 +2749,10 @@ do-not-regress rules; dates mark when the lesson was learned.
   and do not add the Proxies drawer that issue asked for. The core is the
   database and the message model. `core/src/transport.rs` is one IMAP/SMTP
   relay, not a plugin slot. Local chat wraps the booted core and does not
-  replace it. The opt-in Android DNS tunnel (#116/#119) is not a Proxies
+  replace it. The opt-in Android DNS tunnel (#116/#119/#128) is not a Proxies
   drawer either: it reuses that one `proxy_url` and never overrides a
-  proxy the user set (docs/agents/dns-tunnel.md). A profile with no relay is the welcome splash's "Enter local
+  proxy the user set; Auto stays direct when the relays are down, not
+  blocked (docs/agents/dns-tunnel.md). A profile with no relay is the welcome splash's "Enter local
   chat…". Detail: docs/agents/relays.md, docs/agents/p2p.md.
 - **Encoding (2026-09-23)** — every text file is UTF-8 without BOM; no
   exceptions. On this Windows checkout the ANSI codepage is CP1251

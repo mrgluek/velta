@@ -136,7 +136,7 @@ mod imp {
     fn network_info() -> Option<Value> {
         // Keep the guard bound: the JObject borrows the GlobalRef inside it.
         let ctx_guard = crate::APP_CONTEXT.lock().unwrap();
-        let context = ctx_guard.as_ref().map(|r| r.as_obj().clone())?;
+        let context = ctx_guard.as_ref().map(|r| r.as_obj())?;
         let vm_guard = crate::APP_JAVA_VM.lock().unwrap();
         let mut env = vm_guard.as_ref()?.attach_current_thread().ok()?;
         let class_guard = crate::APP_NETINFO_CLASS.lock().unwrap();
@@ -252,7 +252,7 @@ mod imp {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                     let Ok(lib) = lib() else { continue };
-                    let generation = unsafe { (lib.route_gen)() } as i64;
+                    let generation = unsafe { (lib.route_gen)() };
                     if last.is_some_and(|l| l != generation) {
                         let accounts = crate::ANDROID_ACCOUNTS.lock().unwrap().clone();
                         if let Some(accounts) = accounts {

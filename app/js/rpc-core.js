@@ -64,6 +64,15 @@ const isUnknownConfigKey = err => /unknown key/i.test(String(err?.message || err
 
 import { debugLog } from "./diagnostics.js";
 import { pageBounds } from "./format.js";
+import { LruCache } from "./lru.js";
+
+// Bounded (lru.js): message-id lists of the 20 most recently used chats, or
+// 2 MB (8 bytes per id), whichever first. A miss re-asks get_message_ids;
+// an evicted list is not pushed to (get()?.push), so nothing goes stale.
+function newMsgIdCache() {
+  return new LruCache({ maxItems: 20, maxBytes: 2 * 1024 * 1024,
+    sizeOf: (ids) => (Array.isArray(ids) ? ids.length * 8 : 0) });
+}
 
 function rustLog(msg) {
   try {
@@ -91,7 +100,7 @@ export class JsonRpcCore extends EventTarget {
     this.accountEpoch = 0;
     this._accountTransitionBusy = false;
     this.pending = new Map();     // rpc id -> {resolve, reject, onLate?}
-    this.msgIdCache = new Map();  // chatId -> [msgIds ascending]
+    this.msgIdCache = newMsgIdCache();  // chatId -> [msgIds ascending]
     this._sendingIds = new Set(); // msgIds handed to the core, not yet delivered/failed
     this._sendingBackstopTimer = null;
     // Latest known delivery state per outgoing msgId (MsgDelivered/MsgRead/
@@ -105,7 +114,7 @@ export class JsonRpcCore extends EventTarget {
     this._eventChain = Promise.resolve(); // serializes core event handlers (arrival order)
     this._eventsQueued = 0;               // handlers queued or running on _eventChain
     this.eventHandlerStallMs = 2000;      // max time one slow handler holds the queue
-    this.msgIdCache = new Map();  // chatId -> [msgIds ascending]
+    this.msgIdCache = newMsgIdCache();  // chatId -> [msgIds ascending]
     this._onLine = this._onLine.bind(this);
   }
 
@@ -175,7 +184,7 @@ export class JsonRpcCore extends EventTarget {
     if (this._accountTransitionBusy) throw new Error("account transition already in progress");
     this._accountTransitionBusy = true;
     this.accountEpoch++;
-    this.msgIdCache = new Map();
+    this.msgIdCache = newMsgIdCache();
     this._msgStateHints.clear();
     this._callStateCache = new Map(); // call ids are per-account
     if (this._sendingIds.size) {
@@ -197,7 +206,7 @@ export class JsonRpcCore extends EventTarget {
     } finally {
       // Invalidate work started during the transition too, including A -> B -> A.
       this.accountEpoch++;
-      this.msgIdCache = new Map();
+      this.msgIdCache = newMsgIdCache();
       this._accountTransitionBusy = false;
       this._emit("account-changed", { accountId: this.accountId, accountEpoch: this.accountEpoch });
     }

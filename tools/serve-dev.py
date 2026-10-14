@@ -18,6 +18,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=os.path.normpath(ROOT), **kwargs)
 
+    def guess_type(self, path):
+        ctype = super().guess_type(path)
+        if ctype in ("text/css", "text/html", "text/javascript", "application/javascript", "text/plain"):
+            return ctype + "; charset=utf-8"
+        return ctype
+
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         super().end_headers()

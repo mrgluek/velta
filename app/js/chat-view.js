@@ -58,6 +58,8 @@ export function setAvatarProfileOpener(fn) { avatarProfileOpener = fn; }
 setVideoLightboxOpener((src, name) => openVideoLightbox(src, name));
 
 import { diagnosticsSink, debugLog } from "./diagnostics.js";
+import { LruCache } from "./lru.js";
+const ROW_CACHE_MAX = 300; // rendered-row LRU cap (see _rowCache)
 import { fileUrl, mediaFallbackUrl, redactMediaUrl } from "./media.js";
 import { openInAppBrowser } from "./inapp-browser.js";
 import { renderMarkdown, extractBotCommands } from "./markdown.js";
@@ -462,8 +464,17 @@ export class ChatView {
     // _isCurrent() session check can never pass then (#98). Set by app.js
     // after close(); open()/close() clear it.
     this.externalSurface = false;
-    this._rowCache = new Map();  // item.key → rendered element (reused across setItems)
-    this._rowSigCache = new Map();  // item.key → render signature of the cached row
+    // Bounded (lru.js): 300 rows. Detached rows keep their listeners alive,
+    // so a long session must not retain the whole history as detached DOM.
+    // Rows still in the DOM (isConnected) are never evicted; evicting a row
+    // drops its signature too so the two stay in sync.
+    this._rowCache = new LruCache({ maxItems: ROW_CACHE_MAX, maxBytes: Infinity, sizeOf: () => 0,
+      canEvict: (el) => !el?.isConnected,
+      onEvict: (key) => this._rowSigCache.delete(key) });  // item.key → rendered element (reused across setItems)
+    // Signatures can outlive their row briefly (a row dropped for rebuild);
+    // those orphans go first, a signature of a cached row is never evicted.
+    this._rowSigCache = new LruCache({ maxItems: ROW_CACHE_MAX, maxBytes: Infinity, sizeOf: () => 0,
+      canEvict: (_sig, key) => !this._rowCache.has(key) });  // item.key → render signature of the cached row
     this.hasMore = false;
     this.loadingMore = false;
     // Read tracking (see _checkSeen): the loaded window may stop short of
@@ -1404,15 +1415,6 @@ export class ChatView {
     // compare against it instead of treating "no known signature" as a
     // change (which silently rebuilt the row on every duplicate event).
     if (sig != null) this._rowSigCache.set(item.key, sig);
-    // Detached rows keep their event listeners alive while cached — cap the
-    // cache so a long session can't retain the whole history as detached DOM.
-    if (this._rowCache.size > 200) {
-      const oldest = this._rowCache.keys().next().value;
-      if (oldest !== item.key) {
-        this._rowCache.delete(oldest);
-        this._rowSigCache.delete(oldest);
-      }
-    }
     return el;
   }
 

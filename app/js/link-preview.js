@@ -5,8 +5,11 @@
 // (this device loads the card, #30). Old "1" / per-chat "on" are fetch.
 import { escapeHtml, escapeAttr } from "./components.js";
 import { parseInviteLink } from "./invites.js";
+import { LruCache } from "./lru.js";
 
-const CACHE = new Map(); // url -> {title, description, image} | null (failed)
+// Bounded (lru.js): 100 URLs / 2 MB; size = JSON length*2 (image may be a data URL).
+const CACHE = new LruCache({ maxItems: 100, maxBytes: 2 * 1024 * 1024,
+  sizeOf: (v, k) => (String(k).length + (v ? JSON.stringify(v).length : 0)) * 2 }); // url -> {title, description, image} | null (failed)
 const SETTING_KEY = "velta-link-preview";
 const PER_CHAT_KEY = "velta-link-preview-chats"; // { [chatId]: "off" | "picture" | "fetch" }
 
@@ -115,7 +118,21 @@ function invoke(cmd, args) {
   } catch { return Promise.resolve(null); }
 }
 
-let inFlight = new Map(); // url -> Promise (dedupe concurrent renders)
+const inFlight = new Map(); // url -> Promise (dedupe concurrent renders); removed when settled
+
+// The shell fetches with the proxy the user configured (their own SOCKS5/HTTP
+// proxy or the Android DNS tunnel, both live in the core's proxy_url). app.js
+// registers a reader for the active account. Fail closed: no reader yet, or
+// a reader that throws, means no fetch — never a direct one.
+let proxySource = null;
+export function setLinkPreviewProxySource(fn) { proxySource = typeof fn === "function" ? fn : null; }
+
+// proxy_enabled + proxy_url as the core stores them -> the URL to pass, or null.
+export function activeProxyUrl(enabled, url) {
+  if (String(enabled ?? "") !== "1") return null;
+  const first = String(url ?? "").split("\n").map(s => s.trim()).find(Boolean);
+  return first || null;
+}
 
 // Resolves {title, description, image} or null (off/failed/no Tauri).
 // `picture` may call this from the composer. Incoming rows must call it
@@ -132,18 +149,20 @@ export async function linkPreview(text, chatId = null) {
   if (parseInviteLink(url) || isDeltachatIdHost(url)) return null;
   if (CACHE.has(url)) return CACHE.get(url);
   if (inFlight.has(url)) return inFlight.get(url);
-  const p = invoke("fetch_link_preview", { url })
-    .then((r) => {
-      const v = r && (r.title || r.description || r.image) ? r : null;
-      CACHE.set(url, v);
-      inFlight.delete(url);
-      return v;
+  // Not cached when the proxy setting can't be read: a later render retries.
+  let proxyUnknown = false;
+  const p = Promise.resolve()
+    .then(async () => {
+      let proxy;
+      try {
+        if (!proxySource) throw new Error("proxy setting not known yet");
+        proxy = (await proxySource()) || null;
+      } catch (err) { proxyUnknown = true; throw err; }
+      return invoke("fetch_link_preview", { url, proxy });
     })
-    .catch(() => {
-      CACHE.set(url, null);
-      inFlight.delete(url);
-      return null;
-    });
+    .then((r) => (r && (r.title || r.description || r.image) ? r : null), () => null)
+    .then((v) => { if (!proxyUnknown) CACHE.set(url, v); return v; })
+    .finally(() => { inFlight.delete(url); });
   inFlight.set(url, p);
   return p;
 }
@@ -261,3 +280,6 @@ export async function renderPreviewImage(preview, url) {
 function hostOf(url) {
   try { return new URL(url).hostname; } catch { return url; }
 }
+
+// Test hooks (lru-caches.test.mjs).
+export function _linkPreviewCacheStats() { return { size: CACHE.size, bytes: CACHE.bytes, inFlight: inFlight.size }; }

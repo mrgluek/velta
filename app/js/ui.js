@@ -742,6 +742,34 @@ export async function fillSplashVersion(el) {
   slot.textContent = formatSplashVersion({ app, core: CORE_VERSION, tauri, sw });
 }
 
+/* ---------- disclosure menus ---------- */
+// Progressive enhancement for a <details> used as a dropdown: the platform
+// opens and closes it (summary tap, Enter/Space) and exposes the expanded
+// state; this only adds the dismissals a menu needs. Listeners go on while
+// open, from the async "toggle" event, so the opening tap can never close it
+// again. Returns an unwire function.
+export function wireDisclosure(details, { doc = document } = {}) {
+  const onPointer = e => { if (!details.contains(e.target)) details.open = false; };
+  const onKey = e => {
+    if (e.key !== "Escape" || !details.open) return;
+    e.stopPropagation();
+    details.open = false;
+    details.querySelector("summary")?.focus();
+  };
+  const unwire = () => {
+    doc.removeEventListener("pointerdown", onPointer, true);
+    doc.removeEventListener("keydown", onKey, true);
+  };
+  const onToggle = () => {
+    unwire();
+    if (!details.open) return;
+    doc.addEventListener("pointerdown", onPointer, true);
+    doc.addEventListener("keydown", onKey, true);
+  };
+  details.addEventListener("toggle", onToggle);
+  return () => { details.removeEventListener("toggle", onToggle); unwire(); };
+}
+
 /* ---------- Settings drawer ---------- */
 // Notification-switch storage semantics: most keys are default-on ("0" =
 // off, absent = on); "mentions" and "bgforce" are default-off ("1" = on).
@@ -765,10 +793,12 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
         <div class="drawer-name">${escapeHtml(account.displayName)}</div>
         <div class="drawer-links">
           <button type="button" data-act="edit-profile">Edit profile</button>
-          ${accounts.length ? `<button type="button" data-act="switch-account">Switch account<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-          <div class="acct-pop" data-acct-pop hidden>
-            ${accounts.map(a => `<button type="button" class="ctx-item" data-act="account" data-account="${escapeAttr(a.id)}"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 20a8 8 0 0116 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>${a.id === currentAccountId ? `<path d="M8.5 12.5l2.5 2.5 5-5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}</svg><span>${escapeHtml(a.name || a.addr)}${a.id === currentAccountId ? " · current" : ""}</span></button>`).join("")}
-          </div>` : ""}
+          ${accounts.length ? `<details class="acct-switch" data-acct-switch>
+            <summary data-act="switch-account">Switch account<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+            <div class="acct-pop" role="group" aria-label="Accounts">
+            ${accounts.map(a => `<button type="button" class="ctx-item" data-act="account" data-account="${escapeAttr(a.id)}"${a.id === currentAccountId ? ' aria-current="true"' : ""}><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 20a8 8 0 0116 0" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>${a.id === currentAccountId ? `<path d="M8.5 12.5l2.5 2.5 5-5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>` : ""}</svg><span>${escapeHtml(a.name || a.addr)}${a.id === currentAccountId ? " · current" : ""}</span></button>`).join("")}
+            </div>
+          </details>` : ""}
         </div>
       </div>
     </div>
@@ -919,20 +949,11 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
   });
   popups().appendChild(overlay);
 
-  const acctPop = drawer.querySelector("[data-acct-pop]");
-  const switchBtn = drawer.querySelector("[data-act=switch-account]");
-  if (acctPop && switchBtn && popoverSupported()) {
-    acctPop.id = "acct-pop";
-    acctPop.popover = "auto";
-    acctPop.hidden = false;
-    switchBtn.setAttribute("popovertarget", "acct-pop");
-    acctPop.addEventListener("toggle", () => {
-      if (!acctPop.matches(":popover-open")) return;
-      const r = switchBtn.getBoundingClientRect();
-      acctPop.style.left = Math.max(8, Math.min(r.left, innerWidth - acctPop.offsetWidth - 8)) + "px";
-      acctPop.style.top = (r.bottom + 6) + "px";
-    });
-  }
+  // Account switcher: a native <details> disclosure, so the summary opens it
+  // with no JS (tap, Enter, Space). wireDisclosure only adds the closing:
+  // outside tap, Escape, and a pick (the drawer click handler closes it).
+  const acctSwitch = drawer.querySelector("[data-acct-switch]");
+  const unwireAcct = acctSwitch ? wireDisclosure(acctSwitch) : () => {};
 
   // Interface scale radios (inside the spoiler): apply live, keep the
   // summary label in sync. Radios have no data-act, so the drawer stays open.
@@ -1077,9 +1098,7 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
   }
   function close() {
     drawer.classList.remove("open");
-    if (acctPop?.matches?.(":popover-open")) {
-      try { acctPop.hidePopover(); } catch {}
-    } else if (acctPop) acctPop.hidden = true;
+    if (acctSwitch) acctSwitch.open = false;
     // the overlay may already be gone (wiped by closeAllPopups) — guard it
     if (overlay.isConnected) overlay.style.display = "none";
     document.removeEventListener("pointerdown", onDocPointer, true);
@@ -1154,10 +1173,8 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
     const act = btn.dataset.act;
-    if (act === "switch-account") {
-      if (!popoverSupported()) acctPop.hidden = !acctPop.hidden;
-      return;
-    }
+    // The <summary> toggles natively; the drawer stays open.
+    if (act === "switch-account") return;
     close();
     if (act === "saved") onOpenChat("saved");
     if (act === "invite") onInvite?.();
@@ -1173,7 +1190,13 @@ export function buildDrawer({ account, onProfileManagement, onSetTheme, onOpenCh
     if (act === "about") showAbout();
   });
 
-  return { open, close, el: drawer, overlayEl: overlay };
+  // Rebuilds (rebuildDrawer) discard this drawer: drop the document
+  // listeners an open drawer or switcher still holds.
+  function destroy() {
+    unwireAcct();
+    document.removeEventListener("pointerdown", onDocPointer, true);
+  }
+  return { open, close, destroy, el: drawer, overlayEl: overlay, acctSwitch };
 }
 
 // Profile editor — edits the display name, the avatar picture and the

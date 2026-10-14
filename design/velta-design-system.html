@@ -37,9 +37,10 @@
   th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); }
   th { color: var(--dim); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
   td.mono, .mono { font: 12.5px ui-monospace, Consolas, monospace; }
-  .ok { color: var(--good); } .off { color: var(--bad); }
+  .ok { color: var(--good); } .warn { color: var(--warn); } .off { color: var(--bad); }
   .bar-ladder { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; margin: 12px 0 4px; }
   .bar-ladder i { display: block; background: var(--accent); border-radius: 3px 3px 0 0; }
+  .bar-ladder i.ex { background: var(--warn); }
   .bar-ladder span { font: 11px ui-monospace, monospace; color: var(--dim); text-align: center; }
   section { margin-top: 48px; }
   .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px; }
@@ -61,7 +62,7 @@
 </head>
 <body>
 <h1 id="top">Velta Design System</h1>
-<p class="sub">Static token reference · snapshot of <span class="mono">app/css/main.css</span> · v1.4.57 · 2026-10-05 · companion to <span class="mono">velta-design-system.svg</span> · regenerate card markup when tokens change</p>
+<p class="sub">Static token reference · snapshot of <span class="mono">app/css/main.css</span> · v1.4.69 · 2026-10-14 · companion to <span class="mono">velta-design-system.svg</span> · regenerate card markup when tokens change</p>
 <p class="sub toc">Sections:
   <a href="#colors-dark">colors-dark</a> · <a href="#colors-light">colors-light</a> · <a href="#colors-brutal">colors-brutal</a> ·
   <a href="#typography">typography</a> · <a href="#spacing">spacing</a> · <a href="#radii">radii</a> ·
@@ -108,13 +109,13 @@
       <div class="card" id="--bg-reply-light"><div class="swatch" style="background:rgba(16,16,16,.05)"></div><div class="tok"><span class="name">--bg-reply</span> <span class="val">rgba(16,16,16,.05)</span></div></div>
       <div class="card" id="--accent-light"><div class="swatch" style="background:#3390ec"></div><div class="tok"><span class="name">--accent</span> <span class="val">#3390ec</span></div></div>
       <div class="card" id="--text-light"><div class="swatch" style="background:#16181d"></div><div class="tok"><span class="name">--text</span> <span class="val">#16181d</span></div></div>
-      <div class="card" id="--text-dim-light"><div class="swatch" style="background:#6f7480"></div><div class="tok"><span class="name">--text-dim</span> <span class="val">#6f7480</span></div></div>
+      <div class="card" id="--text-dim-light"><div class="swatch" style="background:#656a76"></div><div class="tok"><span class="name">--text-dim</span> <span class="val">#656a76 — contrast pass, 4.93 AA</span></div></div>
       <div class="card" id="--text-meta-in-light"><div class="swatch" style="background:#9aa0ab"></div><div class="tok"><span class="name">--text-meta-in</span> <span class="val">#9aa0ab</span></div></div>
       <div class="card" id="--text-meta-out-light"><div class="swatch" style="background:#2a6ea6"></div><div class="tok"><span class="name">--text-meta-out</span> <span class="val">#2a6ea6</span></div></div>
       <div class="card" id="--border-light"><div class="swatch" style="background:rgba(16,16,16,.08)"></div><div class="tok"><span class="name">--border</span> <span class="val">rgba(16,16,16,.08)</span></div></div>
       <div class="card" id="--shadow-light"><div class="swatch" style="background:#e7ebf0;box-shadow:0 4px 18px rgba(16,16,16,.18)"></div><div class="tok"><span class="name">--shadow</span> <span class="val">0 4px 18px rgba(16,16,16,.18)</span></div></div>
       <div class="card" id="--accent-2-light"><div class="swatch" style="background:#8774e1"></div><div class="tok"><span class="name">--accent-2</span> <span class="val">#8774e1</span></div><div class="inh">inherited from dark — contrast on light unverified</div></div>
-      <div class="card" id="--green-light"><div class="swatch" style="background:#4fae4f"></div><div class="tok"><span class="name">--green</span> <span class="val">#4fae4f</span></div><div class="inh">inherited from dark — contrast on light unverified</div></div>
+      <div class="card" id="--green-light"><div class="swatch" style="background:#3d9146"></div><div class="tok"><span class="name">--green</span> <span class="val">#3d9146 — light override, 3.58 UI</span></div></div>
       <div class="card" id="--danger-light"><div class="swatch" style="background:#e05a5a"></div><div class="tok"><span class="name">--danger</span> <span class="val">#e05a5a</span></div><div class="inh">inherited from dark — contrast on light unverified</div></div>
       <div class="card" id="--radius-bubble-light"><div class="swatch" style="background:#e1f0fb;border-radius:14px"></div><div class="tok"><span class="name">--radius-bubble</span> <span class="val">14px</span></div><div class="inh">inherited from dark</div></div>
       <div class="card" id="--head-h-light"><div class="swatch" style="background:#5aa2e6;height:28px"></div><div class="tok"><span class="name">--head-h</span> <span class="val">56px</span></div><div class="inh">inherited from dark</div></div>
@@ -170,9 +171,9 @@
 <section>
   <h2 id="spacing">Spacing — 2px grid</h2>
   <div class="bar-ladder" id="space-ladder">
-    <span><i style="width:26px;height:14px;background:var(--bad)"></i>1†</span><span><i style="width:26px;height:20px"></i>2</span><span><i style="width:26px;height:26px;background:var(--bad)"></i>3†</span><span><i style="width:26px;height:32px"></i>4</span><span><i style="width:26px;height:38px;background:var(--bad)"></i>5†</span><span><i style="width:26px;height:44px"></i>6</span><span><i style="width:26px;height:50px;background:var(--bad)"></i>7†</span><span><i style="width:26px;height:56px"></i>8</span><span><i style="width:26px;height:62px;background:var(--bad)"></i>9†</span><span><i style="width:26px;height:68px"></i>10</span><span><i style="width:26px;height:74px;background:var(--bad)"></i>11†</span><span><i style="width:26px;height:80px"></i>12</span><span><i style="width:26px;height:86px;background:var(--bad)"></i>13†</span><span><i style="width:26px;height:92px"></i>14</span><span><i style="width:26px;height:98px;background:var(--bad)"></i>15†</span><span><i style="width:26px;height:104px"></i>16</span><span><i style="width:26px;height:116px"></i>18</span><span><i style="width:26px;height:140px"></i>22</span>
+    <span><i class="ex" style="width:26px;height:14px"></i>1†</span><span><i style="width:26px;height:20px"></i>2</span><span><i class="ex" style="width:26px;height:26px"></i>3†</span><span><i style="width:26px;height:32px"></i>4</span><span><i class="ex" style="width:26px;height:38px"></i>5†</span><span><i style="width:26px;height:44px"></i>6</span><span><i class="ex" style="width:26px;height:50px"></i>7†</span><span><i style="width:26px;height:56px"></i>8</span><span><i class="ex" style="width:26px;height:62px"></i>9†</span><span><i style="width:26px;height:68px"></i>10</span><span><i class="ex" style="width:26px;height:74px"></i>11†</span><span><i style="width:26px;height:80px"></i>12</span><span><i class="ex" style="width:26px;height:86px"></i>13†</span><span><i style="width:26px;height:92px"></i>14</span><span><i class="ex" style="width:26px;height:98px"></i>15†</span><span><i style="width:26px;height:104px"></i>16</span><span><i style="width:26px;height:116px"></i>18</span><span><i style="width:26px;height:140px"></i>22</span>
   </div>
-  <p class="legend">Bar height scales with the value; occurrence counts live in the audit table below. Counts from re-audit 2026-10-05, after both 2px-grid snaps (<span class="mono">d3526f4</span> + the chip/contrast pass; integers, absolute; var/calc/env excluded). Red (†) = odd on the 2px grid — remaining: 1×2, 3×8, 5×10, 7×6, 9×1, 11×3, 13×2, 15×1. On-grid covers ~91% of uses. Above the ladder: 24×4, 26×1, 32×1 (one-off structural).</p>
+  <p class="legend">Bar height scales with the value. Blue = 2px grid. Amber (†) = odd step, documented exception — not a bug (optical bubble pad, 48px composer/button, media half-bleed, pill chrome). Counts 2026-10-14, padding/margin/gap only (var/calc/env excluded): 1×6, 3×8, 5×17, 7×9, 9×3, 11×3, 13×2, 15×1. On-grid ~89.5%. Do not snap the exceptions. Above the ladder: 24×4, 26×1, 32×1 (structural).</p>
   <table>
     <tr><th>Tier</th><th>Values</th><th>Used for</th></tr>
     <tr><td>Gap — tight</td><td class="mono">2 · 4</td><td>icon↔label, head-actions, meta</td></tr>
@@ -234,16 +235,16 @@
 </section>
 
 <section>
-  <h2 id="rhythm-audit">Rhythm audit — re-audit 2026-10-05, post-snap</h2>
-  <p class="note">Original audit checked every padding/margin/gap/size in main.css (351 styled blocks) against the 2px grid; snap I landed in <span class="mono">d3526f4</span> (gaps 5/7/11, row paddings 9px, day-chip 5×13, radii 9/11/18), snap II resolved the chip paddings and the light-theme contrast gaps. This re-audit counts what remains: on-grid values cover ~91% of all gap/padding/margin uses; the leftovers are micro-typography and documented deliberate exceptions.</p>
+  <h2 id="rhythm-audit">Rhythm audit — exceptions (amber), no third snap</h2>
+  <p class="note">Original audit checked every padding/margin/gap/size in main.css against the 2px grid; snap I landed in <span class="mono">d3526f4</span>, snap II resolved chip paddings and light-theme contrast. Odd steps on the ladder stay amber: they are optical/target exceptions, not leftover bugs. A 2026-10-14 recount of padding/margin/gap is ~89.5% even. Do not snap the rows below.</p>
   <table>
     <tr><th>Finding</th><th>Where</th><th>Status / suggestion</th></tr>
     <tr><td class="ok">chip/badge paddings 0 5px → 0 4px, 3px 9px → 3px 8px</td><td>go-down badge, pin-tray count, toast chips, lc-queue chip</td><td>resolved — snap II</td></tr>
-    <tr><td class="ok">msg media margins ±5px</td><td>msg-image, msg-video, msg-audio</td><td>deliberate — half of the bubble's 10px padding, geometric half-bleed</td></tr>
-    <tr><td class="ok">bubble 7px 10px 6px · composer-input 13px · btn-primary 11px vertical</td><td>bubble, composer, primary buttons</td><td>deliberate — optical centering / 48px target; keep, documented</td></tr>
-    <tr><td class="ok">1px ×2, 3px ×8, 13px ×2, 15px ×1 micro-values</td><td>bot-chip 1.5px 4px, toast-close, meta gaps 3px, service-msg 3px, composer 13, one 15px</td><td>micro-typography scale below the grid; accept</td></tr>
+    <tr><td class="warn">msg media margins ±5px</td><td>msg-image, msg-video, msg-audio</td><td>exception — half of the bubble's 10px padding, geometric half-bleed</td></tr>
+    <tr><td class="warn">bubble 7px 10px 6px · composer-input 13px · btn-primary 11px vertical</td><td>bubble, composer, primary buttons</td><td>exception — optical centering / 48px target; keep</td></tr>
+    <tr><td class="warn">1 / 3 / 13 / 15px micro-values</td><td>bot-chip 1.5px 4px, toast-close, meta gaps 3px, service-msg 3px, composer 13, one 15px</td><td>exception — micro-typography below the grid</td></tr>
     <tr><td class="ok">svg icon heights 13/14/16/17/20/22/26</td><td>all icon rules</td><td>resolved — --ico-1..5 tokens (14/16/20/22/26): 13→14, 17→16, 18→20, 12→14. Global svg fallback stays 24; display graphics (30/56/168/280) and controls (checkboxes, count badge) deliberately not tokenized</td></tr>
-    <tr><td class="off">radii: pin-tray-count 9px</td><td>18px-tall count bubble</td><td>deliberate half-height circle (renders as 50%)</td></tr>
+    <tr><td class="warn">radii: pin-tray-count 9px</td><td>18px-tall count bubble</td><td>exception — half-height circle (renders as 50%)</td></tr>
     <tr><td class="ok">light theme contrast pass</td><td>html[data-theme="light"]</td><td>resolved — --text-dim #656a76 (4.93, AA), --green #3d9146 override (3.58, UI); inherited --danger 3.3 and --accent-2 3.4 verified UI-ok; --accent 3.01 accepted as UI-only</td></tr>
   </table>
 </section>

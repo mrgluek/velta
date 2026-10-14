@@ -35,6 +35,12 @@ test("top native controls are wired", () => {
   assert.match(chat, /<progress class="mfp-bar"/);
   assert.match(chat, /field-sizing/);
   assert.match(css, /field-sizing:\s*content/);
+  assert.match(css, /^@charset "UTF-8";/);
+  // Raw UTF-8 in content: becomes "â€º" when the stylesheet is parsed as
+  // Latin-1 (no charset on text/css). Escapes stay the glyph.
+  for (const m of css.matchAll(/content:\s*"([^"]*)"/g)) {
+    assert.equal([...m[1]].every((c) => c.charCodeAt(0) < 128), true, m[0]);
+  }
   assert.match(html, /id="btn-new-chat"/);
   assert.match(css, /\.bar-btn\.bar-accent\.active \{ border-radius: 8px; \}/);
   assert.match(ui, /role="switch"/);

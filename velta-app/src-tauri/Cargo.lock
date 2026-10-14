@@ -7226,6 +7226,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "socks"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0c3dbbd9ae980613c6dd8e28a9407b50509d3803b57624d5dfe8315218cd58b"
+dependencies = [
+ "byteorder",
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "softbuffer"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8753,6 +8764,7 @@ dependencies = [
  "once_cell",
  "rustls",
  "rustls-pki-types",
+ "socks",
  "url",
  "webpki-roots 0.26.11",
 ]
@@ -8814,7 +8826,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "velta-app"
-version = "1.4.68"
+version = "1.4.69"
 dependencies = [
  "anyhow",
  "data-encoding",
