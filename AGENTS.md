@@ -1522,7 +1522,18 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   model as `expand_invite_link`: https-only, 5 s timeout, 256 KB page /
   512 KB image cap) and inlines og:image as a `data:` URL (CSP img-src has
   `data:` everywhere; remote hosts stay out). In-memory cache per URL;
-  failed fetches cached as null. Never fetched: a registered invite URL
+  failed fetches cached as null. **Proxy/tunnel:** the page and og:image
+  go through the active account's proxy — app.js registers
+  `setLinkPreviewProxySource` (reads `proxy_enabled` + `proxy_url`, first
+  list entry), so the user's own SOCKS5/HTTP proxy and the Android DNS
+  tunnel (tunnel.rs writes its `socks5://velta-tunnel:…@127.0.0.1` URL into
+  `proxy_url`) both apply; `fetch_link_preview(url, proxy)` builds the ureq
+  agent in `link_preview_agent` (ureq `socks-proxy` feature; SOCKS5 resolves
+  the host on the proxy side). Fails closed: no reader / a failed config read
+  means no fetch (not cached, retried on the next render), and a proxy ureq
+  can't speak (`ss://`, `https://`, `socks4`) or a dead one is an Err — never
+  a direct fetch. `expand_invite_link`, `probe_relay` and `fetch_page_title`
+  still fetch directly. Never fetched: a registered invite URL
   (already an invite card) and any `deltachat.id` URL (short username
   links are invite cards; the rest of that host is the same service).
   Setting: drawer → “Link previews” radios, and the same three on the

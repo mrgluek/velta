@@ -15,7 +15,7 @@ globalThis.localStorage = {
   removeItem(k) { delete store[k]; },
 };
 
-const { linkPreview, linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_IP_WARNING, senderPreviewUrl, receiveFetchesPreview, wrapLines, renderPreviewImage, linkPreviewCardHtml } = await import("../app/js/link-preview.js");
+const { linkPreview, setLinkPreviewProxySource, activeProxyUrl, linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_IP_WARNING, senderPreviewUrl, receiveFetchesPreview, wrapLines, renderPreviewImage, linkPreviewCardHtml } = await import("../app/js/link-preview.js");
 
 test("link previews are off until a mode is chosen, and the old on is fetch", () => {
   localStorage.removeItem("velta-link-preview");
@@ -66,6 +66,7 @@ test("deltachat.id and invite links are not fetched", async () => {
       },
     },
   };
+  setLinkPreviewProxySource(async () => null);
   setLinkPreviewMode("off");
   assert.equal(await linkPreview("https://example.com/page"), null);
   setLinkPreviewMode("picture");
@@ -119,4 +120,44 @@ test("wrapLines breaks on the measure, and keeps a single word", () => {
   assert.deepEqual(wrapLines("one two three", 7, measure), ["one two", "three"]);
   assert.deepEqual(wrapLines("hello", 3, measure), ["hello"]);
   assert.deepEqual(wrapLines("", 10, measure), []);
+});
+
+test("the configured proxy is passed to the shell fetch, and an unknown one blocks it", async () => {
+  const calls = [];
+  globalThis.window.__TAURI__ = {
+    core: { invoke(cmd, args) { calls.push({ cmd, args }); return Promise.resolve({ title: "T" }); } },
+  };
+  setLinkPreviewMode("fetch");
+  const tunnel = "socks5://velta-tunnel:pw@127.0.0.1:41234";
+  setLinkPreviewProxySource(async () => tunnel);
+  assert.equal((await linkPreview("https://proxied.example/a")).title, "T");
+  assert.deepEqual(calls.at(-1), { cmd: "fetch_link_preview", args: { url: "https://proxied.example/a", proxy: tunnel } });
+
+  // No reader registered, or a reader that fails: no fetch at all (never
+  // direct), and nothing cached so a later render retries.
+  calls.length = 0;
+  setLinkPreviewProxySource(null);
+  assert.equal(await linkPreview("https://unknown.example/a"), null);
+  setLinkPreviewProxySource(async () => { throw new Error("rpc down"); });
+  assert.equal(await linkPreview("https://unknown.example/a"), null);
+  assert.equal(calls.length, 0);
+  setLinkPreviewProxySource(async () => null);
+  assert.equal((await linkPreview("https://unknown.example/a")).title, "T");
+  assert.deepEqual(calls, [{ cmd: "fetch_link_preview", args: { url: "https://unknown.example/a", proxy: null } }]);
+});
+
+test("activeProxyUrl follows proxy_enabled and takes the first list entry", () => {
+  assert.equal(activeProxyUrl("1", "socks5://a:1"), "socks5://a:1");
+  assert.equal(activeProxyUrl("1", "\n socks5://a:1 \nhttp://b:2"), "socks5://a:1");
+  assert.equal(activeProxyUrl("0", "socks5://a:1"), null);
+  assert.equal(activeProxyUrl(null, "socks5://a:1"), null);
+  assert.equal(activeProxyUrl("1", ""), null);
+  assert.equal(activeProxyUrl("1", null), null);
+  const app = readFileSync(new URL("../app/js/app.js", import.meta.url), "utf8");
+  assert.match(app, /setLinkPreviewProxySource\(/);
+  assert.match(app, /getConfig\("proxy_enabled"\)/);
+  assert.match(app, /getConfig\("proxy_url"\)/);
+  const rs = readFileSync(new URL("../velta-app/src-tauri/src/lib.rs", import.meta.url), "utf8");
+  assert.match(rs, /async fn fetch_link_preview\(url: String, proxy: Option<String>\)/);
+  assert.match(rs, /link_preview_agent\(proxy\.as_deref\(\)\)\?/);
 });

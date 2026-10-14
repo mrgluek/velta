@@ -82,6 +82,7 @@ test("link-preview cache is bounded and in-flight entries clear on settle", asyn
   globalThis.localStorage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
   const lp = await import("../app/js/link-preview.js");
   if (lp.setLinkPreviewMode) lp.setLinkPreviewMode("fetch"); else store.set("velta-link-preview", "fetch");
+  lp.setLinkPreviewProxySource?.(async () => null); // fetches only once the proxy setting is known
   const a = lp.linkPreview("see https://example.com/0");
   const b = lp.linkPreview("again https://example.com/0");
   await Promise.all([a, b]);

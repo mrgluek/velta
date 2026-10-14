@@ -18,7 +18,7 @@ import { timeAgo, formatBytes, timeTag } from "./format.js";
 import { acquireCode, mountScanner } from "./qr-scan.js";
 import { scanTabAvailable, canShareLink, copyLink, shareLink, classifyScannedCode } from "./qr-actions.js";
 import { parseSharePayload, shareTextIfUnconsumed, sharePlan, createShareInbox, buildSharePicker } from "./share-in.js";
-import { linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_LABELS } from "./link-preview.js";
+import { linkPreviewMode, setLinkPreviewMode, LINK_PREVIEW_LABELS, setLinkPreviewProxySource, activeProxyUrl } from "./link-preview.js";
 import { extractTunnelLink, acceptTunnelLink, openTunnelSettings, refreshTunnelStatus, tunnelInstalled, tunnelStatus, describeTunnel, bindTunnelNetworkEvents, initTunnelDiagnostics } from "./tunnel.js";
 import { wrapIdentityBundle, unwrapIdentityBundle, buildIdentityBundle, bytesToBase64, base64ToBytes, backupDownloadName, gzipBytes, mailLoginFromTransports, accountDirFromToml, mailLoginsFromDbText } from "./identity-backup.js";
 
@@ -5433,6 +5433,15 @@ async function boot() {
     // usable even when a later boot stage fails. uiLive marks the point
     // after which a boot failure keeps the (partially working) UI instead
     // of falling back to the splash.
+    // Link previews (shell-side fetch) use the active account's proxy: the
+    // user's own or the DNS tunnel's (tunnel.rs writes it into proxy_url).
+    // A failed read throws, and link-preview.js then skips the fetch.
+    setLinkPreviewProxySource(async () => {
+      if (!core) throw new Error("core not ready");
+      if (!core.getConfig) return null; // demo core: no proxy, no shell fetch
+      const [enabled, url] = await Promise.all([core.getConfig("proxy_enabled"), core.getConfig("proxy_url")]);
+      return activeProxyUrl(enabled, url);
+    });
     appLog("boot: rebuildDrawer");
     try {
       rebuildDrawer();

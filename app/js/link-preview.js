@@ -120,6 +120,20 @@ function invoke(cmd, args) {
 
 const inFlight = new Map(); // url -> Promise (dedupe concurrent renders); removed when settled
 
+// The shell fetches with the proxy the user configured (their own SOCKS5/HTTP
+// proxy or the Android DNS tunnel, both live in the core's proxy_url). app.js
+// registers a reader for the active account. Fail closed: no reader yet, or
+// a reader that throws, means no fetch — never a direct one.
+let proxySource = null;
+export function setLinkPreviewProxySource(fn) { proxySource = typeof fn === "function" ? fn : null; }
+
+// proxy_enabled + proxy_url as the core stores them -> the URL to pass, or null.
+export function activeProxyUrl(enabled, url) {
+  if (String(enabled ?? "") !== "1") return null;
+  const first = String(url ?? "").split("\n").map(s => s.trim()).find(Boolean);
+  return first || null;
+}
+
 // Resolves {title, description, image} or null (off/failed/no Tauri).
 // `picture` may call this from the composer. Incoming rows must call it
 // only for `fetch` — a picture-mode receive must not contact the site.
@@ -135,10 +149,19 @@ export async function linkPreview(text, chatId = null) {
   if (parseInviteLink(url) || isDeltachatIdHost(url)) return null;
   if (CACHE.has(url)) return CACHE.get(url);
   if (inFlight.has(url)) return inFlight.get(url);
+  // Not cached when the proxy setting can't be read: a later render retries.
+  let proxyUnknown = false;
   const p = Promise.resolve()
-    .then(() => invoke("fetch_link_preview", { url }))
+    .then(async () => {
+      let proxy;
+      try {
+        if (!proxySource) throw new Error("proxy setting not known yet");
+        proxy = (await proxySource()) || null;
+      } catch (err) { proxyUnknown = true; throw err; }
+      return invoke("fetch_link_preview", { url, proxy });
+    })
     .then((r) => (r && (r.title || r.description || r.image) ? r : null), () => null)
-    .then((v) => { CACHE.set(url, v); return v; })
+    .then((v) => { if (!proxyUnknown) CACHE.set(url, v); return v; })
     .finally(() => { inFlight.delete(url); });
   inFlight.set(url, p);
   return p;
