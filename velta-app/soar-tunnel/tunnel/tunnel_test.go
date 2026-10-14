@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -563,5 +564,120 @@ func TestTunnelCheckedOnlyBeforeASwitch(t *testing.T) {
 	tt.applyProbe(tt.confirmViaTunnel(tt.probe()))
 	if probes.Load() != 0 {
 		t.Fatalf("the first blocked probe must not touch the tunnel (%d probes)", probes.Load())
+	}
+}
+
+// probeLog records every TLS probe and answers ok for the hosts in ok.
+func probeLog(ok ...string) (func(context.Context, string, string) error, func() []string) {
+	var mu sync.Mutex
+	var seen []string
+	return func(_ context.Context, hostport, _ string) error {
+			mu.Lock()
+			seen = append(seen, hostport)
+			mu.Unlock()
+			if slices.Contains(ok, hostport) {
+				return nil
+			}
+			return errors.New("refused")
+		}, func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), seen...)
+		}
+}
+
+func TestCanariesSkippedWhenARelayAnswers(t *testing.T) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAuto, echoDialer("D:", &n), echoDialer("T:", &n))
+	tt.mu.Lock()
+	tt.relays["relay.example.org"] = time.Now()
+	tt.mu.Unlock()
+	probe, seen := probeLog("relay.example.org:443")
+	tt.probeTLS = probe
+	res := tt.probe()
+	if res.RelayOK != 1 || res.CanaryChecked || res.CanaryOK {
+		t.Fatalf("relay answered, canaries must be left alone: %+v", res)
+	}
+	if got := seen(); !slices.Equal(got, []string{"relay.example.org:443"}) {
+		t.Fatalf("probed %v", got)
+	}
+}
+
+func TestCanariesSkippedWithoutRelays(t *testing.T) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAuto, echoDialer("D:", &n), echoDialer("T:", &n))
+	probe, seen := probeLog(DefaultCanaries...)
+	tt.probeTLS = probe
+	if res := tt.probe(); res.CanaryChecked || len(seen()) != 0 {
+		t.Fatalf("nothing to compare the canaries with: %+v, probed %v", res, seen())
+	}
+}
+
+func TestCanariesOneAtATimeLastGoodFirst(t *testing.T) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAuto, echoDialer("D:", &n), echoDialer("T:", &n))
+	tt.mu.Lock()
+	tt.relays["relay.example.org"] = time.Now()
+	tt.mu.Unlock()
+
+	// Every canary answers: the first one is enough.
+	probe, seen := probeLog(DefaultCanaries...)
+	tt.probeTLS = probe
+	if res := tt.probe(); !res.CanaryChecked || !res.CanaryOK {
+		t.Fatalf("canary must answer: %+v", res)
+	}
+	if got := seen(); !slices.Equal(got, []string{"relay.example.org:443", DefaultCanaries[0]}) {
+		t.Fatalf("want one canary handshake, probed %v", got)
+	}
+
+	// The first fails at once, the second answers and becomes the first next time.
+	probe, seen = probeLog(DefaultCanaries[1])
+	tt.probeTLS = probe
+	if res := tt.probe(); !res.CanaryOK {
+		t.Fatalf("second canary must count: %+v", res)
+	}
+	if got := seen(); !slices.Equal(got, []string{"relay.example.org:443", DefaultCanaries[0], DefaultCanaries[1]}) {
+		t.Fatalf("probed %v", got)
+	}
+	probe, seen = probeLog(DefaultCanaries[1])
+	tt.probeTLS = probe
+	tt.probe()
+	if got := seen(); !slices.Equal(got, []string{"relay.example.org:443", DefaultCanaries[1]}) {
+		t.Fatalf("last good canary must go first, probed %v", got)
+	}
+}
+
+func TestSilentCanaryDoesNotHoldUpTheNext(t *testing.T) {
+	var n atomic.Int32
+	tt := newTestTunnel(t, ModeAuto, echoDialer("D:", &n), echoDialer("T:", &n))
+	tt.mu.Lock()
+	tt.relays["relay.example.org"] = time.Now()
+	tt.mu.Unlock()
+	// The first canary hangs until cancelled (a dropped SYN), the second answers.
+	var cancelled atomic.Bool
+	tt.probeTLS = func(ctx context.Context, hostport, _ string) error {
+		switch hostport {
+		case DefaultCanaries[0]:
+			<-ctx.Done()
+			cancelled.Store(true)
+			return ctx.Err()
+		case DefaultCanaries[1]:
+			return nil
+		}
+		return errors.New("refused")
+	}
+	start := time.Now()
+	if res := tt.probe(); !res.CanaryOK {
+		t.Fatalf("second canary must count: %+v", res)
+	}
+	if d := time.Since(start); d >= probeTimeout {
+		t.Fatalf("waited %v for the silent canary", d)
+	}
+	deadline := time.Now().Add(time.Second)
+	for !cancelled.Load() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !cancelled.Load() {
+		t.Fatal("the silent canary's probe must be cancelled once another answers")
 	}
 }

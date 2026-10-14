@@ -137,7 +137,7 @@ export function tunnelReport(s, { app = "", now = new Date() } = {}) {
     `soar: ${s.soar || "?"}`,
     `zone: ${s.zone || "?"}  resolvers: ${s.resolvers ?? "?"}`,
     `mode: ${s.mode}  route: ${s.route}  state: ${s.state}  since: ${s.route_since || "?"}`,
-    `last probe: ${s.last_probe || "never"}  relays ok ${s.last_result?.relay_ok ?? 0}/${s.last_result?.relays ?? 0}  canary ok: ${!!s.last_result?.canary_ok}${s.last_result?.tunnel_checked ? `  via tunnel ok: ${!!s.last_result.tunnel_ok}` : ""}`,
+    `last probe: ${s.last_probe || "never"}  relays ok ${s.last_result?.relay_ok ?? 0}/${s.last_result?.relays ?? 0}  canary ok: ${s.last_result?.canary_checked ? !!s.last_result.canary_ok : "not checked"}${s.last_result?.tunnel_checked ? `  via tunnel ok: ${!!s.last_result.tunnel_ok}` : ""}`,
     `relays: ${(s.relays || []).join(", ") || "none yet"}`,
     `network: ${s.network?.transport || "?"}  operator: ${s.network?.sim_operator || s.operator || "?"} ${s.network?.operator_name || ""}  private dns: ${s.network?.private_dns ? s.network.private_dns_name || "on" : "off"}`,
     `network resolvers: ${(s.network_resolvers || []).join(", ") || "none"}`,

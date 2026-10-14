@@ -64,7 +64,10 @@ the router decides per connection:
 used when it starts with TLS (993, 465, 443) and on 443 for STARTTLS ports. All relays failing
   while any canary answers twice in a row = blocked → TUNNEL; a relay
   answering directly three times = back to DIRECT; nothing answering =
-  offline, no change. Before that switch the same relays are TLS-probed
+  offline, no change. Canaries are probed only when no relay answered
+  (they only tell blocked from offline), one at a time with the last one
+  that answered first; the next starts after a failure or 2 s of silence,
+  and the first answer cancels the rest. Before that switch the same relays are TLS-probed
   through the tunnel: if a live soar session can't reach any of them
   either, they are down, not blocked (one profile with one dead relay
   looks exactly like an allowlist), so the route stays DIRECT with state

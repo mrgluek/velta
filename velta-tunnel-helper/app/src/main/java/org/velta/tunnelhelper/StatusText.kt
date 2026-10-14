@@ -23,8 +23,13 @@ object StatusText {
         val probe = s.optString("last_probe")
         if (!probe.startsWith("0001-")) {
             val r = s.optJSONObject("last_result") ?: JSONObject()
-            sb.append("Last check ${clock(probe)}: probe hosts ${r.optInt("relay_ok")}/${r.optInt("relays")} ok, ")
-                .append(if (r.optBoolean("canary_ok")) "allowlisted sites answer\n" else "allowlisted sites silent\n")
+            // Allowlisted sites are only checked when no probe host answered.
+            val canary = when {
+                !r.optBoolean("canary_checked") -> ""
+                r.optBoolean("canary_ok") -> ", allowlisted sites answer"
+                else -> ", allowlisted sites silent"
+            }
+            sb.append("Last check ${clock(probe)}: probe hosts ${r.optInt("relay_ok")}/${r.optInt("relays")} ok$canary\n")
         }
         sb.append("Probe hosts: ${list(s.optJSONArray("relays")).ifEmpty { "none yet" }}\n")
         sb.append("Tunnel session: ${if (s.optBoolean("session")) "up" else "down"}, ")

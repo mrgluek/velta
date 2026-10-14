@@ -34,14 +34,17 @@ test("status lines", () => {
 test("report carries routing state and events only", () => {
   const text = tunnelReport({
     zone: "t.example.org", resolvers: 21, soar: "v0.1", mode: "auto", route: "tunnel", state: "blocked",
-    last_result: { relays: 2, relay_ok: 0, canary_ok: true }, relays: ["relay.example.org"],
+    last_result: { relays: 2, relay_ok: 0, canary_checked: true, canary_ok: true }, relays: ["relay.example.org"],
     active: { direct: 0, tunnel: 2 }, stats: { tunnel: { conns: 5, fails: 1, up: 2048, down: 4096 } },
     events: [{ t: "2026-10-11T10:00:00Z", msg: "route direct -> tunnel (blocked)" }],
   }, { app: "1.4.65", now: new Date("2026-10-11T10:05:00Z") });
   assert.match(text, /relays ok 0\/2 {2}canary ok: true/);
   assert.doesNotMatch(text, /via tunnel/);
-  assert.match(tunnelReport({ last_result: { relays: 1, relay_ok: 0, canary_ok: true, tunnel_checked: true, tunnel_ok: false }, events: [] }),
+  assert.match(tunnelReport({ last_result: { relays: 1, relay_ok: 0, canary_checked: true, canary_ok: true, tunnel_checked: true, tunnel_ok: false }, events: [] }),
     /relays ok 0\/1 {2}canary ok: true {2}via tunnel ok: false/);
+  // A relay answered, so the canaries were never probed.
+  assert.match(tunnelReport({ last_result: { relays: 1, relay_ok: 1 }, events: [] }),
+    /relays ok 1\/1 {2}canary ok: not checked/);
   assert.match(text, /tunnel: active 2, conns 5, fails 1, up 2 KB, down 4 KB/);
   assert.match(text, /route direct -> tunnel \(blocked\)/);
   assert.doesNotMatch(text, /pass|user/i);

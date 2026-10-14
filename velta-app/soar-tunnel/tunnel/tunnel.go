@@ -14,6 +14,7 @@ import (
 	"log/slog"
 	"net"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -62,6 +63,9 @@ const (
 	suspiciousLifetime    = 20 * time.Second
 	interceptProbeTimeout = 800 * time.Millisecond
 	suspiciousBytes       = 512
+	// canaryStagger is how long one canary gets before the next one starts
+	// alongside it (they run one at a time; see probeCanaries).
+	canaryStagger = 2 * time.Second
 )
 
 type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
@@ -105,6 +109,7 @@ type Tunnel struct {
 	state       string
 	lastProbe   time.Time
 	lastResult  probeResult
+	lastCanary  string // the canary that answered last; tried first next time
 	stats       [2]routeStats
 	// Bytes per route, counted as they flow: IMAP IDLE connections live for
 	// hours, so totals taken at close would show nothing for them.
@@ -129,6 +134,10 @@ type probeResult struct {
 	Relays   int  `json:"relays"`
 	RelayOK  int  `json:"relay_ok"`
 	CanaryOK bool `json:"canary_ok"`
+	// CanaryChecked: the canaries were probed. They are skipped when a relay
+	// answers directly (the network is open whatever they say) or when
+	// there is no relay to probe yet.
+	CanaryChecked bool `json:"canary_checked,omitempty"`
 	// Set by confirmViaTunnel before a switch to the tunnel: the same relays
 	// probed through a live tunnel session.
 	TunnelChecked bool `json:"tunnel_checked,omitempty"`
@@ -528,9 +537,12 @@ func (t *Tunnel) nextProbeIn() time.Duration {
 	}
 }
 
-// probe checks the most recently used relays and the canaries over real TLS:
-// a bare TCP connect proves nothing behind a fake-IP VPN or an allowlist
-// that lets SYNs through and cuts TLS.
+// probe checks the most recently used relays over real TLS, and the
+// canaries only when no relay answered: a bare TCP connect proves nothing
+// behind a fake-IP VPN or an allowlist that lets SYNs through and cuts TLS.
+// The canaries only tell "blocked" from "offline", so with a relay answering
+// (or no relay known yet) they would be handshakes for nothing, every few
+// minutes on an open network and every 30 s on the tunnel route.
 func (t *Tunnel) probe() probeResult {
 	t.mu.Lock()
 	hosts := make([]string, 0, len(t.relays))
@@ -543,7 +555,7 @@ func (t *Tunnel) probe() probeResult {
 		hosts = hosts[:maxProbedRelays]
 	}
 	res := probeResult{Relays: len(hosts), hosts: hosts}
-	var mu sync.Mutex
+	var ok atomic.Int32
 	var wg sync.WaitGroup
 	for _, h := range hosts {
 		wg.Add(1)
@@ -558,29 +570,78 @@ func (t *Tunnel) probe() probeResult {
 				port = "443"
 			}
 			if t.probeTLS(ctx, net.JoinHostPort(h, port), h) == nil {
-				mu.Lock()
-				res.RelayOK++
-				mu.Unlock()
+				ok.Add(1)
 			}
 		}(h)
 	}
-	// Any canary answering is enough: one allowlisted site may be down.
-	for _, c := range t.cfg.Canaries {
-		wg.Add(1)
-		go func(c string) {
-			defer wg.Done()
-			ctx, cancel := context.WithTimeout(t.ctx, probeTimeout)
-			defer cancel()
-			host, _, _ := net.SplitHostPort(c)
-			if t.probeTLS(ctx, c, host) == nil {
-				mu.Lock()
-				res.CanaryOK = true
-				mu.Unlock()
-			}
-		}(c)
-	}
 	wg.Wait()
+	res.RelayOK = int(ok.Load())
+	if res.Relays > 0 && res.RelayOK == 0 {
+		res.CanaryChecked = true
+		res.CanaryOK = t.probeCanaries()
+	}
 	return res
+}
+
+// probeCanaries reports whether any canary completes a TLS handshake. One
+// answering is enough (a single allowlisted site may be down), so they go
+// one at a time, the one that answered last first: the next starts when the
+// previous fails or has had canaryStagger without an answer, and the first
+// answer cancels the rest. Usually that is one handshake instead of three.
+func (t *Tunnel) probeCanaries() bool {
+	t.mu.Lock()
+	order := append([]string(nil), t.cfg.Canaries...)
+	last := t.lastCanary
+	t.mu.Unlock()
+	if i := slices.Index(order, last); i > 0 {
+		order = append([]string{last}, slices.Delete(order, i, i+1)...)
+	}
+	if len(order) == 0 {
+		return false
+	}
+	ctx, cancel := context.WithCancel(t.ctx)
+	defer cancel()
+	type answer struct {
+		canary string
+		ok     bool
+	}
+	answers := make(chan answer, len(order)) // buffered: late answers never block
+	start := func(c string) {
+		go func() {
+			pctx, pcancel := context.WithTimeout(ctx, probeTimeout)
+			defer pcancel()
+			host, _, _ := net.SplitHostPort(c)
+			answers <- answer{c, t.probeTLS(pctx, c, host) == nil}
+		}()
+	}
+	next, running := 1, 1
+	start(order[0])
+	for running > 0 {
+		var stagger <-chan time.Time
+		if next < len(order) {
+			stagger = time.After(canaryStagger)
+		}
+		select {
+		case a := <-answers:
+			running--
+			if a.ok {
+				t.mu.Lock()
+				t.lastCanary = a.canary
+				t.mu.Unlock()
+				return true
+			}
+		case <-stagger:
+		case <-ctx.Done():
+			return false
+		}
+		// A failure or a stagger tick: bring in the next canary, if any.
+		if next < len(order) {
+			start(order[next])
+			next++
+			running++
+		}
+	}
+	return false
 }
 
 // confirmViaTunnel runs when the next "blocked" probe would switch to the
@@ -632,10 +693,13 @@ func (t *Tunnel) applyProbe(res probeResult) {
 	route, fail, ok, state := decide(t.route, res, t.failStreak, t.okStreak, healthy)
 	if state != t.state {
 		via := ""
-		if res.TunnelChecked {
-			via = fmt.Sprintf(", via tunnel ok=%v", res.TunnelOK)
+		if res.CanaryChecked {
+			via = fmt.Sprintf(", canary ok=%v", res.CanaryOK)
 		}
-		t.log.add("state %s -> %s (relays %d/%d ok, canary ok=%v%s)", t.state, state, res.RelayOK, res.Relays, res.CanaryOK, via)
+		if res.TunnelChecked {
+			via += fmt.Sprintf(", via tunnel ok=%v", res.TunnelOK)
+		}
+		t.log.add("state %s -> %s (relays %d/%d ok%s)", t.state, state, res.RelayOK, res.Relays, via)
 	}
 	t.failStreak, t.okStreak, t.state = fail, ok, state
 	if t.mode == ModeAuto {
