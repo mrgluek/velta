@@ -132,6 +132,7 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 │   └── android-arm64/
 │
 ├── signing/                  # local signing keystore (untracked)
+├── design/                   # token snapshot of app/css/main.css (HTML + SVG); restamp header with APP_VERSION
 ├── docs/agents/              # per-subsystem agent notes (webxdc, relays,
 │                              p2p/local chat, android-shell, media,
 │                              onboarding, security-triage) — referenced from §5/§11
@@ -1897,6 +1898,10 @@ replies; applies regardless of which tools or modes are active.)
   `setuptools`.
 
 ### 6.4 Visual design
+- Token snapshot: `design/velta-design-system.html` + `.svg`. Header version
+  matches APP_VERSION. 2px spacing grid; odd steps on the ladder are amber
+  documented exceptions (bubble `7 10 6`, composer `13`, ±5 media bleed,
+  pin-tray `9`) — do not snap them to even pixels.
 - **No pure black or pure white.** Opaque text and surface colors stay in the
   soft families: whites `#f2f2f5`/`#f4f4f4`, blacks `#0b0b10`–`#1c1c26`
   (`avatar.js` states the rule for fingerprint tiles; keep it everywhere).
