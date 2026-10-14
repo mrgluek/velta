@@ -5,8 +5,11 @@
 // (this device loads the card, #30). Old "1" / per-chat "on" are fetch.
 import { escapeHtml, escapeAttr } from "./components.js";
 import { parseInviteLink } from "./invites.js";
+import { LruCache } from "./lru.js";
 
-const CACHE = new Map(); // url -> {title, description, image} | null (failed)
+// Bounded (lru.js): 100 URLs / 2 MB; size = JSON length*2 (image may be a data URL).
+const CACHE = new LruCache({ maxItems: 100, maxBytes: 2 * 1024 * 1024,
+  sizeOf: (v, k) => (String(k).length + (v ? JSON.stringify(v).length : 0)) * 2 }); // url -> {title, description, image} | null (failed)
 const SETTING_KEY = "velta-link-preview";
 const PER_CHAT_KEY = "velta-link-preview-chats"; // { [chatId]: "off" | "picture" | "fetch" }
 
@@ -115,7 +118,7 @@ function invoke(cmd, args) {
   } catch { return Promise.resolve(null); }
 }
 
-let inFlight = new Map(); // url -> Promise (dedupe concurrent renders)
+const inFlight = new Map(); // url -> Promise (dedupe concurrent renders); removed when settled
 
 // Resolves {title, description, image} or null (off/failed/no Tauri).
 // `picture` may call this from the composer. Incoming rows must call it
@@ -132,18 +135,11 @@ export async function linkPreview(text, chatId = null) {
   if (parseInviteLink(url) || isDeltachatIdHost(url)) return null;
   if (CACHE.has(url)) return CACHE.get(url);
   if (inFlight.has(url)) return inFlight.get(url);
-  const p = invoke("fetch_link_preview", { url })
-    .then((r) => {
-      const v = r && (r.title || r.description || r.image) ? r : null;
-      CACHE.set(url, v);
-      inFlight.delete(url);
-      return v;
-    })
-    .catch(() => {
-      CACHE.set(url, null);
-      inFlight.delete(url);
-      return null;
-    });
+  const p = Promise.resolve()
+    .then(() => invoke("fetch_link_preview", { url }))
+    .then((r) => (r && (r.title || r.description || r.image) ? r : null), () => null)
+    .then((v) => { CACHE.set(url, v); return v; })
+    .finally(() => { inFlight.delete(url); });
   inFlight.set(url, p);
   return p;
 }
@@ -261,3 +257,6 @@ export async function renderPreviewImage(preview, url) {
 function hostOf(url) {
   try { return new URL(url).hostname; } catch { return url; }
 }
+
+// Test hooks (lru-caches.test.mjs).
+export function _linkPreviewCacheStats() { return { size: CACHE.size, bytes: CACHE.bytes, inFlight: inFlight.size }; }

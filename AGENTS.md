@@ -1988,7 +1988,7 @@ next push or the tainted commits come back.
 ### 7.2 Frontend
 
 Regression suites (Node's built-in test runner, no dependencies). Run the
-whole set — 71 files, 536 tests as of 2026-10-14:
+whole set — 72 files, 543 tests as of 2026-10-14:
 
 ```bash
 node --test tests/
@@ -2102,6 +2102,22 @@ test traffic accordingly.
   `make-python-testenv.sh`, `make-rpc-testenv.sh`.
 
 ---
+
+### Bounded in-memory caches (`app/js/lru.js`)
+
+Renderer caches use the shared `LruCache` (Map-backed; evicts LRU while over
+`maxItems` OR `maxBytes`; bytes = string length×2 or a `sizeOf` fn;
+`canEvict` pins entries, `onEvict` hook). Don't add a plain `Map` cache that
+grows per contact/URL/message, and don't use WeakMap for string keys.
+Limits (agreed: ~2 MB or 100 items, whichever first): avatar `svgCache` /
+`bgCache`, link-preview `CACHE` (in-flight promises removed on settle),
+webxdc `infoCache` (also cleared on account switch). Exceptions:
+chat-view `_rowCache`/`_rowSigCache` 300 rows, never evicting a row that
+`isConnected`, eviction drops the signature too; avatar `fprCache` 1000
+contacts (pending promises pinned); rpc-core `msgIdCache` 20 chats / 2 MB.
+webxdc `serials` stays a plain Map on purpose: it is the delivered-serial
+watermark, evicting it would re-post old updates; it is per-instance-delete
+and account-switch cleared. Tests: `tests/lru-caches.test.mjs`.
 
 ## 8. Security considerations
 

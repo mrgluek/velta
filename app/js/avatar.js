@@ -14,6 +14,7 @@
 //   • withCaptions=true — color-name captions per cell (profile view), the
 //                   only surface where the color names are shown.
 import { diagnosticsSink } from "./diagnostics.js";
+import { LruCache } from "./lru.js";
 
 // Single-word CSS color keywords with sRGB triples for contrast math.
 // Pure black/white and near-white keywords are excluded on purpose.
@@ -272,7 +273,8 @@ const GLYPH_LIGHT = "#f4f4f4"; // soft white — never pure
 // 🐴 ceiling: Elena's unsafeHTML still parses the cached string into DOM on
 // every render; upgrade path if profiling shows that parse matters: return
 // template-content clones instead of strings.
-const svgCache = new Map(); // cacheKey → svg string
+// Bounded (lru.js): 100 strings / 2 MB; a miss just rebuilds the string.
+const svgCache = new LruCache({ maxItems: 100, maxBytes: 2 * 1024 * 1024 }); // cacheKey → svg string
 
 // Grey of the same lightness: the tile keeps its pattern but carries no
 // identity colors (no key behind it yet).
@@ -323,7 +325,8 @@ let clipSeq = 0;
 // Elena's per-render DOM parse entirely; the browser decodes and caches
 // one image per unique fingerprint. Still vector — sharp at any size/DPR.
 // Only the node-less grid/badge variants (no captions, no clipPath id).
-const bgCache = new Map(); // fingerprint+variant → data URL
+// Bounded (lru.js): 100 data URLs / 2 MB (size = length*2).
+const bgCache = new LruCache({ maxItems: 100, maxBytes: 2 * 1024 * 1024 }); // fingerprint+variant → data URL
 
 export function avatarBackgroundUrl({ groups, badge = true, mono = false }) {
   if (!groups || groups.length !== 10) return "";
@@ -340,10 +343,12 @@ export function avatarBackgroundUrl({ groups, badge = true, mono = false }) {
 
 /* ---------- fingerprint lookup (wired by app.js to the active core) ---------- */
 // Keyed by (accountId, contactId): contact ids are per-account, so switching
-// accounts must not reuse — or wipe — another account's entries. Entries are
-// kept forever; a contact bound to its key never changes, and the map holds
-// one short string per contact ever rendered.
-const fprCache = new Map(); // `${accountId}:${contactId}` -> Promise<fingerprint|null>
+// accounts must not reuse — or wipe — another account's entries. A contact
+// bound to its key never changes; entries are one short string each, so the
+// LRU cap is generous (1000 contacts) — eviction only costs one refetch.
+// Pending promises are never evicted (concurrent callers must share them).
+const fprCache = new LruCache({ maxItems: 1000, maxBytes: Infinity, sizeOf: () => 0,
+  canEvict: (p) => "value" in p }); // `${accountId}:${contactId}` -> Promise<fingerprint|null>
 let fingerprintSource = null;
 let fingerprintAccountId = null;
 // (contactId) => address. Used when the tile was not given one, so a contact
@@ -398,6 +403,6 @@ export function fingerprintFor(contactId, addr) {
     return deriveFingerprint(who || "id:" + contactId);
   });
   fprCache.set(key, p);
-  p.then((fpr) => { p.value = fpr; }).catch(() => {});
+  p.then((fpr) => { p.value = fpr; }, () => { p.value = null; });
   return p;
 }
