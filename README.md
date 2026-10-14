@@ -1217,7 +1217,7 @@ by value with their integration notes — lives in
 ├── deltachat-backend/          # Prebuilt deltachat-rpc-server binaries
 │   ├── windows-x86_64/
 │   └── android-arm64/
-├── docs/pwa-self-host.md       # host your own wasm PWA; origin A + WS proxy on B
+├── docs/pwa-self-host.md       # host your own wasm PWA; clone branch pwa-dist
 ├── tools/                      # icon generation, WSL APK build/sign helpers,
 │                               # serve-dev.py (no-cache static server for app/)
 ├── signing/                    # local signing keystore (untracked)

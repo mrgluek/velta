@@ -25,8 +25,9 @@ build/test commands, and conventions as they actually exist in this checkout.
 - **Standalone browser** — the wasm PWA dist (`scripts/build-pwa.mjs`) is a
   static site with the Chatmail core in a worker. Mail uses a WebSocket
   proxy on a chatmail relay; the PWA origin and the proxy host can differ
-  (`docs/pwa-self-host.md`). Serving plain `app/` still falls back to a
-  mock core (UI smoke test).
+  (`docs/pwa-self-host.md`). Self-hosters clone the `pwa-dist` orphan
+  branch (prebuilt + `.wasm.br`/`.gz`, force-pushed, never merged). Serving
+  plain `app/` still falls back to a mock core (UI smoke test).
 
 The unifying frontend is in `app/` (vanilla JavaScript, custom web components,
 no bundler). It auto-detects the available backend via `app/js/transport.js` and
@@ -147,13 +148,13 @@ A prebuilt set of command-line RPC servers for Windows and Android is kept in
 ├── docs/research/wasm-core-mail-proxy-spike.md    # wasm spike log, day-by-day — status header = current state
 ├── docs/research/wasm-core-landing-checklist.md   # landing gate: every ⬜→✅ box; master core/ stays stock until green
 ├── docs/research/wasm-core-lock-landing-plan.md   # ordered review/merge steps for the core/Cargo.lock diff at landing
-├── docs/pwa-self-host.md          # host your own wasm PWA; origin A + WS proxy on B
+├── docs/pwa-self-host.md          # host your own wasm PWA; Quick start = clone branch pwa-dist; origin A + WS proxy on B
 ├── docs/relay-modules.md          # install / configure / uninstall: invite-only signup and the WebSocket proxy
 ├── docs/research/websockify-c3-deploy.md          # C3 runbook: deploy the websockify-c3 relay, verify, RELAY_WS_URL e2e
 ├── docs/research/ws-relay-endpoints-probe.md      # external WS endpoints vs the C3 contract — chatmail.uk /ygg-ws = Yggdrasil peering, not a mail tunnel (10-09)
 ├── docs/research/wasm-patches/   # 10-patch wasm series (series.txt, VENDORED.md, pinned locks + PROVENANCE)
 ├── packages/deltachat-wasm/      # MPL wasm wrapper — README = local wasm-pack build + e2e recipes
-├── scripts/build-pwa.mjs         # C4 PWA dist builder (app/ + wasm assets + pwa-config.js + precache SW); refuses a wasm without sqlite_export unless --allow-no-db-persist — §4.2.1
+├── scripts/build-pwa.mjs         # C4 PWA dist builder (app/ + wasm assets + pwa-config.js + precache SW + wasm.br/gz sidecars not in PRECACHE); refuses a wasm without sqlite_export unless --allow-no-db-persist — §4.2.1; ship snapshot is git branch pwa-dist
 ├── scripts/relay-invite/         # invite-only signup: invite.py CGI (interstitial + claim) + invite-tool.py CLI + README (deploy/features/troubleshooting) — deployed to the private relay (§4.2.1 relay-list bullet)
 ├── scripts/verify-pwa-dist.mjs   # PWA dist rig: 10 checks (boot, OPFS persist incl. sqlite/, SW, identity-backup surface)
 └── tools/                    # icon generation, WSL APK build/sign helpers,
@@ -2215,7 +2216,11 @@ dist precaches the app shell + wasm in a content-hash-named SW cache
 and, since 10-09, posts OS notifications through that SW (§ notification
 taps above). The vestigial-SW caveat below applies only to plain `app/`.
 
-- Serve `build/dist-pwa/` over HTTPS (whole tree, including `sw.js`).
+- Self-hosters clone `pwa-dist` (`docs/pwa-self-host.md` Quick start) and
+  upload that tree except `.git`. From-source path: serve `build/dist-pwa/`
+  over HTTPS (whole tree, including `sw.js` and the `.wasm.br`/`.gz`
+  sidecars). Refresh `pwa-dist` after a dist rebuild: orphan commit,
+  `git push --force origin HEAD:pwa-dist`. Never merge that branch.
 - Plain `app/`: the service worker is unregistered at boot (stale-JS-upgrade
   incidents — see §4.2); nothing caches that tree.
 - If `deltachat-rpc-server` or the Android service is running on the same
@@ -2387,6 +2392,7 @@ talks to Google.
 | Type-check the Android shell | `wsl -e bash -lc "cd /mnt/c/Users/pave/Velta/velta/velta-app/src-tauri && cargo check --target aarch64-linux-android"` (desktop `cargo check` compiles the `cfg(target_os = "android")` code OUT — it proves nothing about JNI/Rust-side Android code) |
 | Run Tauri dev | `cd velta-app && cargo tauri dev` |
 | Serve PWA locally | `cd app && python -m http.server 8080` |
+| Self-host PWA (prebuilt) | `git clone --depth 1 --branch pwa-dist --single-branch https://github.com/pbuzdin/velta.git velta-pwa` — upload except `.git`; recipe `docs/pwa-self-host.md`. Refresh: orphan commit of `build/dist-pwa`, `git push --force origin HEAD:pwa-dist` (never merge) |
 | Diagnose service | Open `http://localhost:8080/diag.html` |
 | Run Python CFFI tests | `cd core/python && pytest` |
 | Run Python RPC tests | `cd core/deltachat-rpc-client && pytest` |
