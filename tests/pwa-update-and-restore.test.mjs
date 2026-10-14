@@ -24,6 +24,8 @@ test("the dist service worker installs fresh files and loads the page from the n
   assert.match(b, /reg\.update\(\)/, "a resumed PWA checks for an update");
   assert.match(b, /velta-sw-updated/);
   assert.match(b, /sqlite_export/, "refuses a wasm core that cannot save databases");
+  assert.match(b, /brotliCompressSync/, "precompresses the wasm for static hosts");
+  assert.match(b, /!f\.endsWith\('\.br'\) && !f\.endsWith\('\.gz'\)/, "brotli/gzip sidecars stay out of the SW precache");
 });
 
 test("the wasm wrapper exports the database snapshot bindings", () => {

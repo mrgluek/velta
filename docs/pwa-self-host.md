@@ -7,6 +7,43 @@ proxy on a chatmail relay.
 Native Windows / macOS / Android builds are a different product. This page
 is only the wasm PWA.
 
+## Quick start
+
+A ready-to-serve tree lives on the `pwa-dist` branch: wasm-opt core,
+brotli and gzip sidecars for the wasm, empty `wsProxyUrl` (visitors pick
+a relay in the app). Clone it and upload the files:
+
+```sh
+git clone --depth 1 --branch pwa-dist --single-branch \
+  https://github.com/pbuzdin/velta.git velta-pwa
+```
+
+Copy everything in `velta-pwa/` except `.git` to the HTTPS site root (or
+`/app/` on a chatmail relay). Then:
+
+1. Open the origin in a browser and **Add to Home Screen**.
+2. In the app, **WebSocket relays** → add your chatmail domain.
+3. On that relay, allowlist this PWA origin (`ws_allowed_origins` in
+   [`relay-modules.md`](relay-modules.md)).
+
+HTTPS is required (OPFS, the service worker, WebCrypto). `localhost` is
+fine for a smoke test.
+
+The branch is a snapshot and is force-pushed when the dist is rebuilt.
+Re-clone (or `git fetch --depth 1 origin pwa-dist && git reset --hard
+origin/pwa-dist`) rather than merging.
+
+nginx that can serve the sidecars makes the first visit ~4.4 MB instead
+of ~17 MB. Cloudflare / Netlify / similar CDNs compress on the fly, so
+the sidecars are unused there and harmless.
+
+```nginx
+gzip_static on;
+# brotli_static on;   # if ngx_brotli is installed
+```
+
+Building from source is the rest of this page.
+
 ## What you need
 
 - Node.js 22+ (the dist builder)
@@ -93,6 +130,9 @@ server {
         application/manifest+json webmanifest;
     }
 
+    gzip_static on;
+    # brotli_static on;   # if ngx_brotli is installed
+
     location = /sw.js {
         add_header Cache-Control "no-cache";
     }
@@ -103,8 +143,10 @@ server {
 }
 ```
 
-Pre-compress the wasm (`brotli` / `gzip`) if you can; transfer size is
-what the first visit pays.
+The dist already ships `wasm/deltachat_wasm_bg.wasm.br` and `.gz`.
+`gzip_static` / `brotli_static` pick those up. The service worker still
+fetches the raw `.wasm` (the browser decodes `Content-Encoding`); it
+does not precache the sidecars.
 
 Add to Home Screen from the HTTPS origin. The service worker precaches the
 shell. A new deploy must change `sw.js`'s `VERSION` (the builder hashes the
@@ -182,6 +224,6 @@ same-origin `/app/` URL. If the PWA lives on A, point the interstitial at
 
 ## Updates
 
-Rebuild, re-verify, upload the whole tree. Confirm the served `sw.js`
-`VERSION` line changed. Clients pick it up on the next load or when the
-page comes to the foreground.
+Re-clone `pwa-dist` (or rebuild from source), then upload the whole tree.
+Confirm the served `sw.js` `VERSION` line changed. Clients pick it up on
+the next load or when the page comes to the foreground.

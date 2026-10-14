@@ -72,13 +72,19 @@ not quarantined.
 <details>
 <summary>Self-host the browser PWA</summary>
 
-The wasm PWA is a static site: build with `node scripts/build-pwa.mjs`, serve
-`build/dist-pwa/` over HTTPS. Mail uses a WebSocket proxy on a chatmail relay.
-The PWA origin and the proxy host can be different domains — the relay must
-allowlist the PWA origin (`ws_allowed_origins`).
+A ready-to-serve tree (wasm-opt + brotli/gzip sidecars) lives on the
+`pwa-dist` branch:
 
-Full steps, including that split and what still has to be same-origin for
-account minting: [docs/pwa-self-host.md](docs/pwa-self-host.md).
+```sh
+git clone --depth 1 --branch pwa-dist --single-branch \
+  https://github.com/pbuzdin/velta.git velta-pwa
+```
+
+Upload `velta-pwa/` except `.git` to any HTTPS host. Mail uses a WebSocket
+proxy on a chatmail relay — the PWA origin and the proxy host can differ;
+the relay must allowlist the PWA origin (`ws_allowed_origins`).
+
+Full steps: [docs/pwa-self-host.md](docs/pwa-self-host.md).
 
 </details>
 

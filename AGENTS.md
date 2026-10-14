@@ -352,7 +352,13 @@ node scripts/verify-pwa-dist.mjs
 ```
 
 Self-host (any HTTPS origin, including a PWA on domain A talking to a
-WebSocket proxy on domain B): `docs/pwa-self-host.md`.
+WebSocket proxy on domain B): `docs/pwa-self-host.md`. Quick start is
+`git clone --depth 1 --branch pwa-dist` — that branch is an orphan
+snapshot of `build/dist-pwa` (wasm-opt + `.wasm.br`/`.wasm.gz`, empty
+`wsProxyUrl`) and is **force-pushed**, never merged into master. The
+builder writes the sidecars and keeps them out of the SW precache
+(`scripts/build-pwa.mjs`). Refresh the branch after a dist rebuild:
+orphan commit of the dist tree, `git push --force origin HEAD:pwa-dist`.
 
 Deploy-dist rules (10-09):
 - Relay deploys build with NO `--ws-proxy` — the deployed `pwa-config.js`
