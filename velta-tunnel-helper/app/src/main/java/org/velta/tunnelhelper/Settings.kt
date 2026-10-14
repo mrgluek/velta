@@ -20,6 +20,14 @@ class Settings(context: Context) {
         get() = prefs.getString("probe", "") ?: ""
         set(v) = prefs.edit().putString("probe", v.trim()).apply()
 
+    /**
+     * Start every resolver path at soar's short 101-char query names and let
+     * soar grow them to 253, instead of starting at 253.
+     */
+    var shortNames: Boolean
+        get() = prefs.getBoolean("short_names", false)
+        set(v) = prefs.edit().putBoolean("short_names", v).apply()
+
     /** The user wants the proxy on: a system restart of the service resumes it. */
     var running: Boolean
         get() = prefs.getBoolean("running", false)

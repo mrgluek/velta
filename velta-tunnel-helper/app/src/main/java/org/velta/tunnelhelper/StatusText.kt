@@ -23,8 +23,13 @@ object StatusText {
         val probe = s.optString("last_probe")
         if (!probe.startsWith("0001-")) {
             val r = s.optJSONObject("last_result") ?: JSONObject()
-            sb.append("Last check ${clock(probe)}: probe hosts ${r.optInt("relay_ok")}/${r.optInt("relays")} ok, ")
-                .append(if (r.optBoolean("canary_ok")) "allowlisted sites answer\n" else "allowlisted sites silent\n")
+            // Allowlisted sites are only checked when no probe host answered.
+            val canary = when {
+                !r.optBoolean("canary_checked") -> ""
+                r.optBoolean("canary_ok") -> ", allowlisted sites answer"
+                else -> ", allowlisted sites silent"
+            }
+            sb.append("Last check ${clock(probe)}: probe hosts ${r.optInt("relay_ok")}/${r.optInt("relays")} ok$canary\n")
         }
         sb.append("Probe hosts: ${list(s.optJSONArray("relays")).ifEmpty { "none yet" }}\n")
         sb.append("Tunnel session: ${if (s.optBoolean("session")) "up" else "down"}, ")
@@ -45,20 +50,31 @@ object StatusText {
 
         val paths = s.optJSONArray("paths") ?: JSONArray()
         if (paths.length() > 0) {
+            // Narrow enough for a phone in portrait: the port is implied by the
+            // transport (dot = 853, else 53), the resolver column is as wide as
+            // the longest address, loss is a percentage. "len" is the path's
+            // current query-name cap, to see soar grow it from 101 to 253.
             sb.append("\nResolver paths (working first):\n")
             val rows = (0 until paths.length()).map { paths.getJSONObject(it) }.sortedWith(
                 compareByDescending<JSONObject> { working(it) }.thenByDescending { it.optInt("successes") },
             )
-            for (p in rows) {
+            val names = rows.map { shortResolver(it.optString("resolver")) }
+            val w = (names.maxOfOrNull { it.length } ?: 0).coerceAtLeast(8)
+            val fmt = "%-3s %-4s %-${w}s %4s %4s %5s %3s\n"
+            sb.append(String.format(Locale.ROOT, fmt, "via", "st", "resolver", "rtt", "loss", "ok", "len"))
+            rows.forEachIndexed { i, p ->
                 val mark = when {
-                    p.optBoolean("dead") -> "dead"
                     p.optBoolean("suspended") -> "susp"
                     p.optBoolean("verified") -> "ok"
                     else -> "?"
                 }
-                sb.append(String.format(Locale.ROOT, "  %-4s %-4s %-26s rtt %4d ms  loss %.2f  ok %d\n",
-                    p.optString("transport"), mark, p.optString("resolver"),
-                    p.optLong("rtt") / 1_000_000, p.optDouble("loss", 0.0), p.optInt("successes")))
+                val rtt = p.optLong("rtt") / 1_000_000
+                sb.append(String.format(Locale.ROOT, fmt,
+                    p.optString("transport"), mark, names[i],
+                    if (rtt > 0) rtt.toString() else "-",
+                    "${(p.optDouble("loss", 0.0) * 100).toInt()}%",
+                    p.optInt("successes").toString(),
+                    p.optInt("name_len").takeIf { it > 0 }?.toString() ?: "-"))
             }
         }
 
@@ -102,7 +118,13 @@ object StatusText {
     }
 
     private fun working(p: JSONObject) =
-        p.optBoolean("verified") && !p.optBoolean("suspended") && !p.optBoolean("dead")
+        p.optBoolean("verified") && !p.optBoolean("suspended")
+
+    /** "77.88.8.8:853" -> "77.88.8.8", "[2a0c::1]:53" -> "2a0c::1": the port shows in the transport column. */
+    private fun shortResolver(r: String): String {
+        val m = Regex("^\\[?(.*?)\\]?:(53|853)$").find(r) ?: return r
+        return m.groupValues[1]
+    }
 
     private fun list(a: JSONArray?): String =
         if (a == null) "" else (0 until a.length()).joinToString(", ") { a.optString(it) }

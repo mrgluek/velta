@@ -2,11 +2,9 @@ module soartunnel
 
 go 1.25.0
 
-require github.com/getlantern/soar v0.1.1-0.20261011032230-7225f48bd5b5
+require github.com/getlantern/soar v0.2.0
 
 require (
 	golang.org/x/crypto v0.52.0 // indirect
 	golang.org/x/sys v0.45.0 // indirect
 )
-
-replace github.com/getlantern/soar => github.com/mrgluek/soar v0.1.1-0.20261011202921-d2ebc03f9e09

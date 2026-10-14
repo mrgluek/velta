@@ -28,16 +28,23 @@ test("status lines", () => {
   assert.match(describeTunnel({ installed: true, available: true, running: true, mode: "always", route: "tunnel" }).detail, /Always/);
   assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "offline" }).headline, "No network");
   assert.equal(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "direct" }).headline, "Direct");
+  assert.match(describeTunnel({ installed: true, available: true, running: true, mode: "auto", route: "direct", state: "relays-down" }).detail, /down/);
 });
 
 test("report carries routing state and events only", () => {
   const text = tunnelReport({
     zone: "t.example.org", resolvers: 21, soar: "v0.1", mode: "auto", route: "tunnel", state: "blocked",
-    last_result: { relays: 2, relay_ok: 0, canary_ok: true }, relays: ["relay.example.org"],
+    last_result: { relays: 2, relay_ok: 0, canary_checked: true, canary_ok: true }, relays: ["relay.example.org"],
     active: { direct: 0, tunnel: 2 }, stats: { tunnel: { conns: 5, fails: 1, up: 2048, down: 4096 } },
     events: [{ t: "2026-10-11T10:00:00Z", msg: "route direct -> tunnel (blocked)" }],
   }, { app: "1.4.65", now: new Date("2026-10-11T10:05:00Z") });
   assert.match(text, /relays ok 0\/2 {2}canary ok: true/);
+  assert.doesNotMatch(text, /via tunnel/);
+  assert.match(tunnelReport({ last_result: { relays: 1, relay_ok: 0, canary_checked: true, canary_ok: true, tunnel_checked: true, tunnel_ok: false }, events: [] }),
+    /relays ok 0\/1 {2}canary ok: true {2}via tunnel ok: false/);
+  // A relay answered, so the canaries were never probed.
+  assert.match(tunnelReport({ last_result: { relays: 1, relay_ok: 1 }, events: [] }),
+    /relays ok 1\/1 {2}canary ok: not checked/);
   assert.match(text, /tunnel: active 2, conns 5, fails 1, up 2 KB, down 4 KB/);
   assert.match(text, /route direct -> tunnel \(blocked\)/);
   assert.doesNotMatch(text, /pass|user/i);
@@ -106,14 +113,14 @@ test("Private DNS warning and network lines", () => {
 
 test("path table: working paths first, durations in ms", () => {
   const lines = pathLines([
-    { resolver: "77.88.8.8:853", transport: "dot", verified: false, successes: 0, loss: 1, name_len: 253, answer_max: 512 },
-    { resolver: "8.8.8.8:53", transport: "udp", verified: true, successes: 40, rtt: 62e6, loss: 0.15, name_len: 253, answer_max: 1232 },
-    { resolver: "77.88.8.1:53", transport: "udp", verified: true, successes: 3, rtt: 110e6, suspended: true, name_len: 253, answer_max: 512 },
+    { resolver: "77.88.8.8:853", transport: "dot", verified: false, successes: 0, loss: 1, name_len: 253, answer_limit: 0 },
+    { resolver: "8.8.8.8:53", transport: "udp", verified: true, successes: 40, rtt: 62e6, loss: 0.15, name_len: 253, answer_limit: 1232 },
+    { resolver: "77.88.8.1:53", transport: "udp", verified: true, successes: 3, rtt: 110e6, suspended: true, name_len: 253, answer_limit: 512 },
   ]);
   assert.equal(lines[0], "paths: 2/3 verified");
   assert.match(lines[1], /^ {2}8\.8\.8\.8:53 udp ok rtt=62ms loss=0\.15 answers=40 name=253 ans=1232$/);
   assert.match(lines[2], /77\.88\.8\.1:53 udp suspended rtt=110ms/);
-  assert.match(lines[3], /77\.88\.8\.8:853 dot unverified rtt=- loss=1\.00 answers=0/);
+  assert.match(lines[3], /77\.88\.8\.8:853 dot unverified rtt=- loss=1\.00 answers=0 name=253 ans=-$/);
   assert.deepEqual(pathLines(undefined), ["paths: none (tunnel not started)"]);
 });
 

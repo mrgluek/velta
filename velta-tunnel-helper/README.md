@@ -21,14 +21,20 @@ pinned to "Always tunnel" or "Never tunnel".
    the router learns probe hosts from the traffic, as it does in Velta. That
    works only while a mail app is the only user: a browser opening an
    allowlisted site would make it look as if the network were open.
+   Tap **Save**: a valid link folds the link and probe hosts under a one-line
+   summary (no key on screen); tap the summary to unfold and edit them.
 4. Tap **Start**, allow notifications, and tap **Allow running in background**
    (the battery-optimization exemption). The proxy runs as a foreground
    service with a "Stop" action in its notification.
 5. In the client: SOCKS5, host `127.0.0.1`, port `42000`, no auth. For Delta
    Chat: Settings → Advanced → Proxy → `socks5://127.0.0.1:42000`.
 
-"Apply" (shown while running) restarts the tunnel with edited fields; a mode
-change applies at once. **Copy report** puts the status JSON on the clipboard
+**Save** while running restarts the tunnel with the edited fields; a mode
+change applies at once (connections on the old route are closed and
+reconnect). **Short names first** starts every resolver path at soar's own
+101-char query names and lets soar grow them to 253 (the `len` column of the
+path table shows it); off = start at 253. It takes effect on the next
+Save or Start. **Copy report** puts the status JSON on the clipboard
 with the tunnel zone removed.
 
 ## Limits

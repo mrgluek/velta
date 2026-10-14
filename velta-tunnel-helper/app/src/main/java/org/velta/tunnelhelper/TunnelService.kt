@@ -34,6 +34,8 @@ class TunnelService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val TICK_MS = 15_000L
         private const val NET_SETTLE_MS = 2_000L
+        /** soar's own starting name length (Config.SafeQName default). */
+        private const val SHORT_QNAME = 101
 
         /** The service is up (the proxy may still be starting or retrying). */
         @Volatile
@@ -180,6 +182,7 @@ class TunnelService : Service() {
             cfg.put("listen", LISTEN)
             cfg.put("mode", s.mode)
             cfg.put("probe_targets", JSONArray(s.probeTargets()))
+            if (s.shortNames) cfg.put("safe_qname", SHORT_QNAME)
             cfg.put("system_resolvers", JSONArray(net.dns))
             cfg.put("operator", net.operator)
             val out = Native.json(Native.start(cfg.toString().toByteArray(Charsets.UTF_8)))
