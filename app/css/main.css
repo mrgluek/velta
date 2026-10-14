@@ -1452,12 +1452,6 @@ velta-chat-head { display: flex; align-items: center; gap: 10px; min-width: 0; }
   margin: 0; top: auto; left: auto; height: auto;
   background: var(--bg-sidebar); color: var(--text);
 }
-.acct-pop[popover] {
-  position: fixed; margin: 0; inset: auto;
-  width: max-content; height: auto;
-  background: var(--bg-sidebar); color: var(--text);
-}
-.acct-pop[popover]:not(:popover-open) { display: none; }
 .toasts[popover] {
   margin: 0; border: none; background: transparent; color: inherit;
   overflow: visible; width: auto; height: auto; top: auto;
@@ -1703,7 +1697,8 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
 .drawer-head .velta-avatar-tile { width: 56px; height: 56px; font-size: 22px; }
 .drawer-name { font-size: 17px; font-weight: 600; }
 .drawer-links { display: flex; gap: 8px; margin-top: 8px; position: relative; }
-.drawer-links button {
+.drawer-links button,
+.acct-switch > summary {
   display: inline-flex; align-items: center; gap: 4px;
   background: rgba(244, 244, 244, .14);
   border: 1px solid rgba(244, 244, 244, .28);
@@ -1711,8 +1706,16 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
   padding: 5px 11px; border-radius: 999px; cursor: pointer;
   transition: background .15s;
 }
-.drawer-links button:active { background: rgba(244, 244, 244, .24); }
-.drawer-links button svg { width: var(--ico-1); height: var(--ico-1); }
+.drawer-links button:active,
+.acct-switch > summary:active,
+.acct-switch[open] > summary { background: rgba(244, 244, 244, .24); }
+.drawer-links button svg,
+.acct-switch > summary svg { width: var(--ico-1); height: var(--ico-1); }
+/* account switcher: native <details>; the summary is the pill button */
+.acct-switch > summary { list-style: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+.acct-switch > summary::-webkit-details-marker { display: none; }
+.acct-switch > summary svg { transition: transform .15s; }
+.acct-switch[open] > summary svg { transform: rotate(180deg); }
 
 /* profile editor modal */
 .edit-profile .ep-avatar { display: flex; justify-content: center; padding: 6px 0 2px; }
@@ -1961,7 +1964,8 @@ li.failed .step-ico::after { transform: rotate(-45deg); }
 .drawer-head { position: relative; }
 .drawer-close { position: absolute; top: 10px; right: 10px; z-index: 2; }
 
-/* account switcher dropdown, anchored to the Switch account button */
+/* account switcher dropdown: the <details class="acct-switch"> content,
+   anchored under its summary (.drawer-links is the positioned box) */
 .acct-pop {
   position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
   background: var(--bg-sidebar); border: 1px solid var(--border);
@@ -1969,7 +1973,6 @@ li.failed .step-ico::after { transform: rotate(-45deg); }
   padding: 8px; display: flex; flex-direction: column; gap: 8px;
   min-width: 220px; max-width: calc(100vw - 90px);
 }
-.acct-pop[hidden] { display: none; }
 /* list entries styled like the head's pill buttons. The pop lives inside
    .drawer-head, whose light text would vanish on a light sidebar. */
 .acct-pop .ctx-item {

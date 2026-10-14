@@ -1616,7 +1616,18 @@ Both Python projects use `pyproject.toml`, require Python 3.10+, and configure
   "Service worker" line is the cache name from §4.2.1, and "WebSocket
   relays" opens the list there. The drawer head shows the avatar (self
   profile sheet via `onProfile`), display name, Edit profile and Switch
-  account (`.acct-pop` dropdown, current checked). `.qr-box` carries no
+  account — a native `<details class="acct-switch">` whose `<summary>` is
+  the pill and whose `.acct-pop` content lists the profiles (current one
+  checked + `aria-current`). It opens with no JS; `wireDisclosure()` adds
+  outside-tap/Escape close only while open (attached from the async
+  `toggle` event, so the opening tap can't close it), a pick or drawer
+  close sets `open = false`. Do NOT go back to `popover`/`popovertarget`
+  or a `hidden` toggle. `rebuildDrawer()` calls the old drawer's
+  `destroy()` (drops its document listeners) and re-opens the new drawer
+  and switcher if they were open — rebuilds land asynchronously (boot,
+  refreshAccounts, tunnel status, profile/relay edits) and used to drop
+  the open menu/drawer and leak the old drawer's capture `pointerdown`
+  listener. Tests: `tests/account-switcher.test.mjs`. `.qr-box` carries no
   background/border of its own — the core's QR SVG is self-contained.
   **Native controls (2026-10-07):** the top eight rows of
   `docs/native-elements.md` are in the app (counts in "What landed"); the

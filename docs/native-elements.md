@@ -49,7 +49,7 @@ The table above is the original recommendation, including the ~136 button estima
 | Untyped buttons given `type="submit"` | 10 |
 | Splash "Create account", already `type="button"`, now `type="submit"` | 1 |
 | `<form>`: ask text, group name, edit name, join link, nickname, device name, edit profile (`showModal({ form: true })`), plus profile-add, splash relay, invite domain, local-chat send | 11 |
-| Popovers: context menu, sticker picker, account menu, local-chat queue, toasts | 5 |
+| Popovers: context menu, sticker picker, account menu (replaced by `<details>` 2026-10-14), local-chat queue, toasts | 5 |
 | `<progress>`: transfer, pairing, chat-load, in-app browser, app update | 5 |
 | Relay quota `<meter>` | 1 |
 | `<fieldset>`: 8 drawer groups, disappearing messages, mute | 10 |
@@ -81,7 +81,7 @@ and older macOS, so keep the JS placement.
 | Context menu (6 call sites) | `ui.js:28-55` | transparent `.pop-overlay` + `pointerdown`/`contextmenu` close, z 60, viewport clamp | `popover="auto"` on `.ctx-menu`: light dismiss, Esc, top layer above dialogs (menus *inside* a dialog work). Clamp stays in JS | High | M | Low | P1 |
 | Attach menu | `chat-view.js:2589-2620` | same helper + manual bottom/top math | same; later `position-anchor: --attach` + `position-try` when the floor reaches Chromium 125 / Safari 26 | Med | S (rides on the above) | Low | P1 |
 | Sticker picker | `ui.js:57-97` | overlay, z 930 | `popover="auto"` | Med | S | Low | P1 |
-| Drawer account popover | `ui.js:537,660` | `hidden` toggle + document listener | `popover="auto"` + `popovertarget` on the account button (`aria-expanded` comes free) | Med | S | Low | P2 |
+| Drawer account popover | `ui.js:537,660` | `hidden` toggle + document listener | ~~`popover="auto"` + `popovertarget`~~ landed 2026-10-07, then replaced 2026-10-14 by `<details>/<summary>` (see §2) | Med | S | Low | done |
 | LC queue popover | `app.js:983-1012` | `toggleLcQueuePop`, manual placement, z 920 | `popover="auto"`, `popovertarget="lc-queue-pop"` on `#lc-queue-chip` | Med | S | Low | P2 |
 | Toast stack | `ui.js:155-248`, `#toasts` z 80 | under every full-screen overlay (modals doc M3) | `#toasts[popover="manual"]`, `showPopover()` re-called after each dialog open so it stays topmost | High | S | Med (ordering) | P1 |
 | Selection quote chip | `chat-view.js:2499` | fixed div, inline left/top, z 860 | `popover="manual"` (top layer over lightbox/dialog) | Low | S | Low | P3 |
@@ -102,6 +102,7 @@ Android 7), Safari 17.2.
 | Toasts | `ui.js:166+` | `<details class="toast">` (expand for long errors), fine | – | – | – | keep |
 | Chat-info sections | `app.js:2260,2287,2296,2301` | already native | – | – | – | keep |
 | Pin tray | `chat-view.js:572-635` | already native | – | – | – | keep |
+| Drawer account switcher | `ui.js` `buildDrawer` (`<details class="acct-switch">`) | 2026-10-14: was `popover="auto"` + `popovertarget`, set up by JS after build (and a `hidden` toggle without the Popover API). Now the summary opens it with no JS on every WebView (no Popover floor, no macOS 10.15/11 fallback branch); `wireDisclosure()` adds outside-tap and Escape (focus back to the summary) only while open, from the async `toggle` event, so the opening tap can never close it. A pick and drawer close set `open = false`; `rebuildDrawer` keeps it open across a rebuild. Accounts list is `role="group"`, current account `aria-current`. Not a `role="menu"`: plain Tab order, no arrow-key pattern | High | S | Low | done |
 | Splash log | `app.js:3870` | already native | – | – | – | keep |
 | Exclusive drawer sections | `ui.js:549-610` | `name="drawer-settings"` would auto-close siblings (optional UX; harmless where unsupported) | Low | S | Low | P3 |
 | Diagnostics / message-info raw headers | `chat-view.js:2311` (message info) | long technical blocks could collapse in `<details>` | Low | S | Low | P3 |

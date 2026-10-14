@@ -490,6 +490,7 @@ core.addEventListener("account-changing", () => {
   // row stays tappable; account-changed refills it for the new profile.
   if (listView !== "chats") setListView("chats");
   if (history.state?.velta === "chat") history.replaceState(null, "");
+  drawer?.destroy?.();
   drawer?.el.remove();
   drawer?.overlayEl?.remove();
   drawer = null;
@@ -4302,6 +4303,13 @@ function ensureMultiDevice() {
 
 function rebuildDrawer() {
   if (state.accountChanging) return;
+  // Rebuilds land from async paths (boot, refreshAccounts, tunnel status,
+  // profile/relay edits, Local chat toggle), often while the drawer is open.
+  // Carry the open drawer and account switcher over to the new DOM instead of
+  // silently dropping them, and unhook the old drawer's document listeners.
+  const wasOpen = !!drawer?.el?.classList.contains("open");
+  const switcherWasOpen = !!drawer?.acctSwitch?.open;
+  drawer?.destroy?.();
   drawer?.el.remove();
   drawer?.overlayEl?.remove();
   // Boot/account-change sync: mirror persisted preferences into the core's
@@ -4438,6 +4446,14 @@ function rebuildDrawer() {
       }
     },
   });
+  if (wasOpen) {
+    // no slide-in: the drawer was already on screen
+    drawer.el.style.transition = "none";
+    drawer.open();
+    if (switcherWasOpen && drawer.acctSwitch) drawer.acctSwitch.open = true;
+    void drawer.el.offsetWidth;
+    drawer.el.style.transition = "";
+  }
   ensureMultiDevice();
 }
 

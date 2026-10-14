@@ -18,7 +18,9 @@ and `docs/native-elements.md` (popover and other native-element candidates).
 
 Update (2026-10-07): menus, the sticker picker, the account menu, the
 local-chat queue, and toasts use the Popover API when the WebView has it,
-and prompt modals are `<form>`s. This plan's `<dialog>` conversion has not
+and prompt modals are `<form>`s. Update (2026-10-14): the drawer account
+menu is a native `<details>/<summary>` disclosure instead (`wireDisclosure`
+in `ui.js`; see `docs/native-elements.md` §2). This plan's `<dialog>` conversion has not
 started. See "What landed" in `docs/native-elements.md`.
 
 ---
@@ -180,7 +182,7 @@ element.
 | Context menu (6 sites: chat list `app.js:1762`, old-msg submenu `1782`, chat head `2741`, message `chat-view.js:2269`, reactions `2277`, attach `2606`) | `ui.js:28-55` | `closeAllPopups()` then append; item click → close + action | none; not `role=menu`; no arrow keys | global handler (after boot) | **no entry: back exits the chat/app instead of closing the menu** | transparent overlay `pointerdown`/`contextmenu` | z 60; replaces any modal | n/a | `menuIn` | `popover="auto"` + menu pattern; overlay fallback without popover |
 | Sticker picker | `ui.js:57-97` | as above; tile click picks | none | global | no entry | transparent overlay | z 930 | n/a | none | `popover="auto"` |
 | Drawer | `ui.js:524-878`, CSS `main.css:1494-1510` | `.open` class + `.drawer-overlay` `display`; capture-phase document `pointerdown` closes | none; closed drawer stays tabbable (audit A12) | global | **no entry** | `.drawer-overlay` stops above list bar (`main.css:1252`) | z 55 | n/a | `translateX` transition | stay custom + `inert` while closed (plan 0.3). Optionally modal `<dialog>` later (see M5.4) |
-| Drawer account popover | `ui.js:537,660` | `hidden` toggle | none | global (closes the whole drawer) | no entry | document pointerdown | z 30 inside drawer | n/a | none | `popover="auto"` |
+| Drawer account popover | `ui.js:537,660` | `hidden` toggle | none | global (closes the whole drawer) | no entry | document pointerdown | z 30 inside drawer | n/a | none | ~~`popover="auto"`~~ → `<details>/<summary>` (2026-10-14): opens without JS, Esc + outside tap via `wireDisclosure` |
 | LC queue popover | `app.js:983-1012` | `toggleLcQueuePop`, manual placement under `#lc-queue-chip` | none | none | no entry | document pointerdown | z 920 | n/a | none | `popover="auto"` + `popovertarget` |
 | Selection quote chip | `chat-view.js:2499` | appears on text selection; inline `left/top` | none | none | no | n/a | z 860 | n/a | none | stay custom (could be `popover="manual"`) |
 | Image lightbox | `ui.js:1045-1140` | `openImageLightbox`; tap/✕/Esc → `teardownLightbox(true)` | none | own capture-phase keydown (`ui.js:1074`) | `{velta:"lightbox"}`; popstate tears down on **any** pop (`ui.js:1043`) | tap on stage closes | z 2000 (above modals, call, toasts) | n/a | none | `<dialog>` `showModal()`, full-bleed |
