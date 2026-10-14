@@ -130,6 +130,101 @@ export function parseFingerprint(encrInfo, contactAddr) {
   return hex.length >= 40 ? hex.slice(0, 40).toUpperCase() : null;
 }
 
+// OpenPGP fingerprint of the primary public-key packet in a make_vcard KEY
+// (core writes `KEY:data:application/pgp-keys;base64\,…`). v4 = SHA-1 of
+// 0x99||len16||body; v6 = SHA-256 of 0x9B||len32||body. Null if there is
+// no key yet — never invent one from the address.
+export async function fingerprintFromVcard(vcard) {
+  const unfolded = String(vcard || "").replace(/\r?\n[ \t]/g, "");
+  const m = unfolded.match(/KEY(?::|;[^\r\n]*:)data:application\/pgp-keys;base64\\?,([A-Za-z0-9+/=]+)/i);
+  if (!m) return null;
+  const b64 = m[1];
+  let raw;
+  try { raw = atob(b64); } catch { return null; }
+  const bytes = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+  return fingerprintFromPublicKey(bytes);
+}
+
+export async function fingerprintFromPublicKey(bytes) {
+  const pkt = firstPublicKeyPacket(bytes);
+  if (!pkt) return null;
+  const version = pkt[0];
+  let prefix, hash;
+  if (version === 4) {
+    const n = pkt.length;
+    prefix = new Uint8Array(3 + n);
+    prefix[0] = 0x99;
+    prefix[1] = (n >> 8) & 0xff;
+    prefix[2] = n & 0xff;
+    prefix.set(pkt, 3);
+    hash = "SHA-1";
+  } else if (version === 6 || version === 5) {
+    const n = pkt.length;
+    prefix = new Uint8Array(5 + n);
+    prefix[0] = version === 6 ? 0x9b : 0x9a;
+    prefix[1] = (n >>> 24) & 0xff;
+    prefix[2] = (n >>> 16) & 0xff;
+    prefix[3] = (n >>> 8) & 0xff;
+    prefix[4] = n & 0xff;
+    prefix.set(pkt, 5);
+    hash = "SHA-256";
+  } else {
+    return null;
+  }
+  try {
+    const buf = await crypto.subtle.digest(hash, prefix);
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("").toUpperCase();
+  } catch {
+    return null;
+  }
+}
+
+function firstPublicKeyPacket(bytes) {
+  let i = 0;
+  while (i < bytes.length) {
+    const b = bytes[i];
+    if ((b & 0x80) === 0) return null;
+    let tag, hdr, len;
+    if (b & 0x40) {
+      tag = b & 0x3f;
+      const l1 = bytes[i + 1];
+      if (l1 == null) return null;
+      if (l1 < 192) { hdr = 2; len = l1; }
+      else if (l1 < 224) {
+        const l2 = bytes[i + 2];
+        if (l2 == null) return null;
+        hdr = 3; len = ((l1 - 192) << 8) + l2 + 192;
+      } else if (l1 === 255) {
+        if (i + 5 >= bytes.length) return null;
+        hdr = 6;
+        len = ((bytes[i + 2] << 24) | (bytes[i + 3] << 16) | (bytes[i + 4] << 8) | bytes[i + 5]) >>> 0;
+      } else {
+        return null;
+      }
+    } else {
+      tag = (b >> 2) & 0x0f;
+      const lt = b & 0x03;
+      if (lt === 0) { hdr = 2; len = bytes[i + 1]; }
+      else if (lt === 1) {
+        if (i + 2 >= bytes.length) return null;
+        hdr = 3; len = (bytes[i + 1] << 8) | bytes[i + 2];
+      } else if (lt === 2) {
+        if (i + 4 >= bytes.length) return null;
+        hdr = 5;
+        len = ((bytes[i + 1] << 24) | (bytes[i + 2] << 16) | (bytes[i + 3] << 8) | bytes[i + 4]) >>> 0;
+      } else {
+        return null;
+      }
+    }
+    if (len == null || i + hdr + len > bytes.length) return null;
+    const body = bytes.subarray(i + hdr, i + hdr + len);
+    if (tag === 6) return body;
+    i += hdr + len;
+  }
+  return null;
+}
+
 // Deterministic fallback for contacts without a PGP key: derive a stable
 // pseudo-fingerprint from the address so every contact gets an identity tile.
 export async function deriveFingerprint(addr) {
@@ -255,11 +350,15 @@ let fingerprintAccountId = null;
 // with no key yet hashes the address (stable across devices) instead of the
 // per-database contact id.
 let addrOf = null;
+// () => OpenPGP fingerprint hex for contact 1. get_contact_encryption_info
+// throws for SELF, so the real key comes from make_vcard (or a test stub).
+let selfFingerprint = null;
 
 export function setFingerprintSource(fn, accountId = null, extras = null) {
   fingerprintSource = fn;
   fingerprintAccountId = accountId;
   addrOf = typeof extras?.addrOf === "function" ? extras.addrOf : null;
+  selfFingerprint = typeof extras?.selfFingerprint === "function" ? extras.selfFingerprint : null;
   // Greyscale stand-ins are not final: the profile may have been configured
   // or the contact's key may have arrived since. Ask again.
   for (const [k, p] of fprCache) if (p.derived) fprCache.delete(k);
@@ -270,9 +369,8 @@ export function cachedFingerprint(contactId) {
   return p ? p.value ?? null : null; // .value set once resolved (see below)
 }
 
-// True when the cached tile for this contact is NOT backed by a real key:
-// a contact we have no key for yet, or our own profile before it has an
-// address (not configured). Those tiles render in greyscale.
+// True when the cached tile for this contact is NOT backed by a real key.
+// Those tiles render in greyscale; the profile-key row shows "—".
 export function cachedFingerprintIsDerived(contactId) {
   const p = fprCache.get(`${fingerprintAccountId}:${contactId}`);
   return !!(p && p.derived);
@@ -280,21 +378,23 @@ export function cachedFingerprintIsDerived(contactId) {
 
 export function fingerprintFor(contactId, addr) {
   const key = `${fingerprintAccountId}:${contactId}`;
-  if (fprCache.has(key)) return fprCache.get(key);
+  const hit = fprCache.get(key);
+  // Derived self is not final: make_vcard grows a KEY after configure.
+  if (hit && !(contactId === 1 && hit.derived && hit.value)) return hit;
   if (!fingerprintSource || !contactId || contactId < 1) return Promise.resolve(null);
-  // Self (contact 1) makes get_contact_encryption_info throw; the address
-  // still paints the same tile on every device that has that address.
   const infoP = Promise.resolve().then(() => fingerprintSource(contactId)).catch(() => "");
   const whoP = (addr || !addrOf)
     ? Promise.resolve(addr || "")
     : Promise.resolve().then(() => addrOf(contactId)).then((a) => a || "").catch(() => "");
-  const p = Promise.all([infoP, whoP]).then(([encrInfo, who]) => {
+  const p = Promise.all([infoP, whoP]).then(async ([encrInfo, who]) => {
     const parsed = parseFingerprint(encrInfo, who);
     if (parsed) return parsed;
-    // Self has a key once configured, but its encryption info throws; the
-    // address tile stands in for it. Anyone else without a parsed key, and
-    // self without an address, gets a greyscale tile.
-    p.derived = !(contactId === 1 && who);
+    if (contactId === 1 && selfFingerprint) {
+      const own = await Promise.resolve().then(() => selfFingerprint()).catch(() => null);
+      const hex = String(own || "").replace(/[^0-9A-Fa-f]/g, "").toUpperCase();
+      if (hex.length >= 40) return hex;
+    }
+    p.derived = true;
     return deriveFingerprint(who || "id:" + contactId);
   });
   fprCache.set(key, p);

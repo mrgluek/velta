@@ -298,9 +298,18 @@ Restart `websockify-dns` after changing it. Own-name answers stay
 `["127.0.0.1"]` so this relay's mail does not hairpin through a public
 address.
 
-**PWA.** Build with `node scripts/build-pwa.mjs` and do not pass
-`--ws-proxy` when the page is served by the relay. An empty
-`window.VELTA_PWA.wsProxyUrl` uses the page hostname at boot. Move
+**PWA.** The page origin and this relay domain can differ. Put
+`https://<pwa-origin>` in `ws_allowed_origins` (and the nginx maps).
+Mail tunnels then open `wss://<relay-domain>` from that origin. New
+account minting still needs `/cm-new/` on the PWA origin — serve the
+PWA from this host, or reverse-proxy that path. Full recipe:
+[`pwa-self-host.md`](pwa-self-host.md).
+
+Build with `node scripts/build-pwa.mjs` and do not pass `--ws-proxy`
+when the page is served by the relay (or when the artifact must not
+carry a hostname). An empty `window.VELTA_PWA.wsProxyUrl` uses the page
+hostname at boot, or the domain the visitor picks under WebSocket
+relays. Move
 `app/.mimosa` and `app/js/.mimosa` out of the app tree before the build so hook state is not
 precached. The wasm core must export `sqlite_export` (build refuses
 otherwise) or profiles lose their database on reload. The service worker

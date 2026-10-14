@@ -4,7 +4,7 @@ import "./components.js";
 import { escapeHtml, escapeAttr } from "./components.js";
 import { chatCategoryOf, swipeCategoryStep, batteryReactionPlan } from "./rpc-core.js";
 import { fileUrl, setWasmBlobReader, redactMediaUrl } from "./media.js";
-import { buildAvatarSvg, setFingerprintSource, fingerprintFor, fingerprintGroups, cachedFingerprintIsDerived } from "./avatar.js";
+import { buildAvatarSvg, setFingerprintSource, fingerprintFor, fingerprintFromVcard, fingerprintGroups, cachedFingerprintIsDerived } from "./avatar.js";
 import { ChatView, setAvatarProfileOpener } from "./chat-view.js";
 import { initCalls } from "./calls.js";
 import { initWebxdc } from "./webxdc-manager.js";
@@ -372,11 +372,7 @@ coreStartupPromise = createCore({
 
 try {
   core = withLocalChat(await coreStartupPromise);
-  setFingerprintSource(
-    (contactId) => core.getContactEncryptionInfo(contactId),
-    core.accountId,
-    { addrOf: async (contactId) => (await core.getContact(contactId))?.addr || "" },
-  );
+  wireFingerprints();
 } catch (error) {
   diagnostics.append("error", `Core startup crashed: ${error?.message || error}`);
   diagnostics.append("warning", "Continuing in demo mode so diagnostics and recovery controls remain available");
@@ -463,6 +459,21 @@ function accountIsCurrent(epoch) {
   return !state.accountChanging && epoch === core.accountEpoch;
 }
 
+function wireFingerprints() {
+  setFingerprintSource(
+    (contactId) => core.getContactEncryptionInfo(contactId),
+    core.accountId,
+    {
+      addrOf: async (contactId) => (await core.getContact(contactId))?.addr || "",
+      // get_contact_encryption_info throws for contact 1; make_vcard carries
+      // the public key, whose OpenPGP fingerprint is the real identity.
+      selfFingerprint: async () => core.makeVcard
+        ? fingerprintFromVcard(await core.makeVcard([1]))
+        : null,
+    },
+  );
+}
+
 core.addEventListener("account-changing", () => {
   state.accountChanging = true;
   clearTimeout(chatListRefreshTimer);
@@ -485,11 +496,7 @@ core.addEventListener("account-changing", () => {
 });
 core.addEventListener("account-changed", () => {
   state.accountChanging = false;
-  setFingerprintSource(
-    (contactId) => core.getContactEncryptionInfo(contactId),
-    core.accountId,
-    { addrOf: async (contactId) => (await core.getContact(contactId))?.addr || "" },
-  );
+  wireFingerprints();
   accountRefreshPromise = Promise.all([refreshAccounts(), refreshChatList()]);
 });
 
@@ -4437,26 +4444,38 @@ function rebuildDrawer() {
 // Profile editor flow: name + avatar picture.
 // The core's selfavatar config takes a filesystem path it can read, so the
 // picked image goes through the same pipeline as attachments: absolute path
-// on desktop, content-URI copy into uploads/ on Android, data URL in demo.
+// on desktop, content-URI copy into uploads/ on Android, memfs /uploads/ in
+// the PWA, data URL in demo.
+async function writePickedImage(file) {
+  const write = core?.transport?.writeCoreFile;
+  if (typeof write !== "function") return null;
+  const ext = (String(file.name || "bin").split(".").pop() || "bin").replace(/[^a-z0-9]/gi, "") || "bin";
+  const path = `/uploads/avatar-${Date.now()}.${ext}`;
+  await write.call(core.transport, path, new Uint8Array(await file.arrayBuffer()));
+  return path;
+}
+
 async function pickProfileImage() {
   const tauri = window.__TAURI__;
   const invoke = tauri?.core?.invoke || tauri?.invoke;
   if (!invoke) {
-    // No Tauri dialog (plain browser / mock) — local file as data URL.
-    return new Promise(resolve => {
-      const inp = document.createElement("input");
-      inp.type = "file";
-      inp.accept = "image/png,image/jpeg,image/webp,image/gif";
-      inp.onchange = () => {
-        const f = inp.files && inp.files[0];
-        if (!f) return resolve(null);
-        const reader = new FileReader();
-        reader.onload = () => resolve({ path: String(reader.result), url: String(reader.result) });
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(f);
-      };
+    const inp = document.createElement("input");
+    inp.type = "file";
+    inp.accept = "image/png,image/jpeg,image/webp,image/gif";
+    const file = await new Promise(resolve => {
+      inp.onchange = () => resolve(inp.files && inp.files[0] || null);
       inp.click();
     });
+    if (!file) return null;
+    const path = await writePickedImage(file);
+    if (path) return { path, url: URL.createObjectURL(file) };
+    const dataUrl = await new Promise((ok, bad) => {
+      const reader = new FileReader();
+      reader.onload = () => ok(String(reader.result));
+      reader.onerror = () => bad(reader.error);
+      reader.readAsDataURL(file);
+    });
+    return { path: dataUrl, url: dataUrl };
   }
   let picked = await invoke("plugin:dialog|open", { options: {
     multiple: false,

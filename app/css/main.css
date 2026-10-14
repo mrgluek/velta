@@ -1,3 +1,4 @@
+@charset "UTF-8";
 /* ===== Velta — Telegram-style theme ===== */
 :root {
   --bg: #0f0f14;
@@ -1655,8 +1656,8 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
 /* The chevron must ride INSIDE the value span: as a summary::after it is a
    third flex item in .info-row's space-between layout, which centered the
    (n) count instead of pinning it to the right edge. */
-.info-details > summary .v::after { content: "›"; color: var(--text-dim); margin-left: 6px; }
-.info-details[open] > summary .v::after { content: "⌄"; }
+.info-details > summary .v::after { content: "\203A"; color: var(--text-dim); margin-left: 6px; }
+.info-details[open] > summary .v::after { content: "\2304"; }
 /* Clickable chat rows (chats in common). */
 .modal-list .info-row.clickable { cursor: pointer; }
 @media (hover: hover) and (pointer: fine) {
@@ -1940,7 +1941,7 @@ html[data-theme="brutal"] .msg-row:not(.out) .btn-text { color: var(--accent-2);
 .step-ico { width: var(--ico-2); height: var(--ico-2); flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
 li.active .step-ico { border: 2px solid var(--accent); border-top-color: transparent; animation: ob-spin .8s linear infinite; }
 li.done .step-ico { background: var(--accent); color: #f4f4f4; }
-li.done .step-ico::after { content: "✓"; }
+li.done .step-ico::after { content: "\2713"; }
 /* Unicode ✕ is hairline-thin in the UI font, same as the close buttons. */
 li.failed .step-ico { background: #e0685d; position: relative; }
 li.failed .step-ico::before,

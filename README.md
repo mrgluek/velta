@@ -15,7 +15,7 @@ Velta shares one web frontend (`app/`) between:
 - **Windows desktop** — a Tauri 2 app that bundles `deltachat-rpc-server.exe` as a sidecar.
 - **macOS desktop** (test build) — the same Tauri 2 app with `deltachat-rpc-server` bundled as an `externalBin` sidecar; universal (Apple Silicon + Intel), ad-hoc signed, not notarized yet — see [Install on macOS](#install).
 - **Android mobile** — the same Tauri 2 app, but the Delta Chat core runs in-process inside the APK. A foreground service keeps sync (and notifications) running after the app is backgrounded.
-- **Browser/PWA** (work in progress) — the same frontend can be served statically and connects to a local `velta-core-service` over loopback WebSocket/HTTP, or falls back to a mock core for demo purposes. The PWA's target deployment is a **remote core service over WSS/TLS** — the loopback bridge remains the local/dev path. If the loopback connection drops mid-session (service restart), the app reconnects automatically — backoff up to 15 s — and refreshes the chat list; no reload needed. A refresh of the wasm PWA keeps the signed-in account, its database included: the browser copy is written when login or an identity restore finishes, when the page goes to the background, and every few seconds, and a copy cut off by a reload is ignored in favour of the previous one. A crash can drop the last few seconds until the next sync. A new deploy reaches an open PWA on its next load; a page that was already open shows an update notice.
+- **Browser/PWA** — the same frontend as a static site with a WebAssembly Chatmail core in the tab. Mail goes out through a WebSocket proxy on a chatmail relay (the PWA origin and the proxy host can be different domains). A refresh keeps the signed-in account, database included: the browser copy is written when login or an identity restore finishes, when the page goes to the background, and every few seconds, and a copy cut off by a reload is ignored in favour of the previous one. A crash can drop the last few seconds until the next sync. A new deploy reaches an open PWA on its next load; a page that was already open shows an update notice. Serving `app/` without the wasm dist still falls back to a mock core (UI smoke test) or a loopback `velta-core-service`. How to host your own copy: [docs/pwa-self-host.md](docs/pwa-self-host.md).
 
 The UI is plain HTML/CSS/ES modules (no bundler). The backend is the upstream [Delta Chat core](https://github.com/chatmail/core) at version `2.63.0`.
 
@@ -66,6 +66,19 @@ Data lives in `~/Library/Application Support/org.velta/` (accounts) and logs
 in `~/Library/Logs/org.velta/`. Self-update works like on Windows (signed
 updater archive, see "One-click updates"); updates downloaded by the app are
 not quarantined.
+
+</details>
+
+<details>
+<summary>Self-host the browser PWA</summary>
+
+The wasm PWA is a static site: build with `node scripts/build-pwa.mjs`, serve
+`build/dist-pwa/` over HTTPS. Mail uses a WebSocket proxy on a chatmail relay.
+The PWA origin and the proxy host can be different domains — the relay must
+allowlist the PWA origin (`ws_allowed_origins`).
+
+Full steps, including that split and what still has to be same-origin for
+account minting: [docs/pwa-self-host.md](docs/pwa-self-host.md).
 
 </details>
 
@@ -1198,6 +1211,7 @@ by value with their integration notes — lives in
 ├── deltachat-backend/          # Prebuilt deltachat-rpc-server binaries
 │   ├── windows-x86_64/
 │   └── android-arm64/
+├── docs/pwa-self-host.md       # host your own wasm PWA; origin A + WS proxy on B
 ├── tools/                      # icon generation, WSL APK build/sign helpers,
 │                               # serve-dev.py (no-cache static server for app/)
 ├── signing/                    # local signing keystore (untracked)
